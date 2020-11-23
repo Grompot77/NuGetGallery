@@ -4,6 +4,7 @@
     ViewBag.MdPageColumns = GalleryConstants.ColumnsFormMd;
     TempData["Parent"] = this;
 }
+@ViewHelpers.AjaxAntiForgeryToken(Html)
 
 <section role="main" class="container main-container page-account-settings">
     <div class="row">
@@ -44,7 +45,7 @@
     @ViewHelpers.SectionsScript(this)
     @if (Model.IsCertificatesUIEnabled)
     {
-        @Scripts.Render("~/Scripts/gallery/certificates.js")
+        @Scripts.Render("~/Scripts/gallery/certificates.min.js")
         <script type="text/javascript">
             CertificatesManagement.init('@Url.AddUserCertificate()', '@Url.GetUserCertificates()');
         </script>

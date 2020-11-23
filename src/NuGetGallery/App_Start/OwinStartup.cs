@@ -3,26 +3,26 @@
 
 using System;
 using System.Collections.Generic;
+using System.Configuration;
 using System.Linq;
 using System.Net;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Web;
 using System.Web.Hosting;
 using System.Web.Http;
 using System.Web.Mvc;
 using Elmah;
-using Microsoft.ApplicationInsights;
-using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.Owin;
 using Microsoft.Owin.Logging;
 using Microsoft.Owin.Security;
 using Microsoft.Owin.Security.Cookies;
 using NuGet.Services.FeatureFlags;
-using NuGet.Services.Logging;
 using NuGetGallery.Authentication;
 using NuGetGallery.Authentication.Providers;
 using NuGetGallery.Authentication.Providers.Cookie;
 using NuGetGallery.Configuration;
+using NuGetGallery.Diagnostics;
 using NuGetGallery.Infrastructure;
 using Owin;
 
@@ -62,8 +62,19 @@ namespace NuGetGallery
             var config = dependencyResolver.GetService<IGalleryConfigurationService>();
             var auth = dependencyResolver.GetService<AuthenticationService>();
 
-            // Configure machine key for session persistence across slots
-            SessionPersistence.Setup(config);
+            // Ensure the machine key provider has the shared configuration instance and force the machine key
+            // configuration section to be initialized. This is normally done only when the first request needs the
+            // machine key but we choose to aggressively execute the initialization here outside of the request context
+            // since it is internally awaiting an asynchronous API in a synchronous method. This cannot be done in a
+            // request context because it will cause a deadlock.
+            // 
+            // Note that is is technically possible for some code before this to initialize the machine key (e.g. by
+            // calling an API that uses the  machine key configuration). If this happens, the machine key will be
+            // fetched from KeyVault seperately. This will be slightly slower (two KeyVault secret resolutions instead
+            // of one) but will not be harmful.
+            GalleryMachineKeyConfigurationProvider.Configuration = config;
+            ConfigurationManager.GetSection("system.web/machineKey");
+
             // Refresh the content for the ContentObjectService to guarantee it has loaded the latest configuration on startup.
             var contentObjectService = dependencyResolver.GetService<IContentObjectService>();
             HostingEnvironment.QueueBackgroundWorkItem(async token =>
@@ -74,48 +85,6 @@ namespace NuGetGallery
                     await Task.Delay(ContentObjectService.RefreshInterval, token);
                 }
             });
-
-            // Setup telemetry
-            var instrumentationKey = config.Current.AppInsightsInstrumentationKey;
-            if (!string.IsNullOrEmpty(instrumentationKey))
-            {
-                TelemetryConfiguration.Active.InstrumentationKey = instrumentationKey;
-
-                // Add enrichers
-                TelemetryConfiguration.Active.TelemetryInitializers.Add(new DeploymentIdTelemetryEnricher());
-                TelemetryConfiguration.Active.TelemetryInitializers.Add(new ClientInformationTelemetryEnricher());
-
-                var telemetryProcessorChainBuilder = TelemetryConfiguration.Active.TelemetryProcessorChainBuilder;
-
-                // Add processors
-                telemetryProcessorChainBuilder.Use(next =>
-                {
-                    var processor = new RequestTelemetryProcessor(next);
-
-                    processor.SuccessfulResponseCodes.Add(400);
-                    processor.SuccessfulResponseCodes.Add(404);
-                    processor.SuccessfulResponseCodes.Add(405);
-
-                    return processor;
-                });
-
-                telemetryProcessorChainBuilder.Use(next => new ClientTelemetryPIIProcessor(next));
-
-                var telemetry = dependencyResolver.GetService<TelemetryClientWrapper>();
-                telemetryProcessorChainBuilder.Use(
-                    next => new ExceptionTelemetryProcessor(next, telemetry.UnderlyingClient));
-
-                // Note: sampling rate must be a factor 100/N where N is a whole number
-                // e.g.: 50 (= 100/2), 33.33 (= 100/3), 25 (= 100/4), ...
-                // https://azure.microsoft.com/en-us/documentation/articles/app-insights-sampling/
-                var instrumentationSamplingPercentage = config.Current.AppInsightsSamplingPercentage;
-                if (instrumentationSamplingPercentage > 0 && instrumentationSamplingPercentage < 100)
-                {
-                    telemetryProcessorChainBuilder.UseSampling(instrumentationSamplingPercentage);
-                }
-
-                telemetryProcessorChainBuilder.Build();
-            }
 
             // Configure logging
             app.SetLoggerFactory(new DiagnosticsLoggerFactory());
@@ -134,6 +103,24 @@ namespace NuGetGallery
                 {
                     app.UseForceSsl(config.Current.SSLPort, config.Current.ForceSslExclusion);
                 }
+            }
+
+            var tds = new TraceDiagnosticsSource(nameof(OwinStartup), dependencyResolver.GetService<ITelemetryClient>());
+            if (config.Current.MaxWorkerThreads.HasValue && config.Current.MaxIoThreads.HasValue)
+            {
+                int defaultMaxWorkerThreads, defaultMaxIoThreads;
+                ThreadPool.GetMaxThreads(out defaultMaxWorkerThreads, out defaultMaxIoThreads);
+                tds.Information($"Default maxWorkerThreads: {defaultMaxWorkerThreads}, maxIoThreads: {defaultMaxIoThreads}");
+                var success = ThreadPool.SetMaxThreads(config.Current.MaxWorkerThreads.Value, config.Current.MaxIoThreads.Value);
+                tds.Information($"Attempt to update max threads to {config.Current.MaxWorkerThreads.Value}, {config.Current.MaxIoThreads.Value}, success: {success}");
+            }
+            if (config.Current.MinWorkerThreads.HasValue && config.Current.MinIoThreads.HasValue)
+            {
+                int defaultMinWorkerThreads, defaultMinIoThreads;
+                ThreadPool.GetMinThreads(out defaultMinWorkerThreads, out defaultMinIoThreads);
+                tds.Information($"Default minWorkerThreads: {defaultMinWorkerThreads}, minIoThreads: {defaultMinIoThreads}");
+                var success = ThreadPool.SetMinThreads(config.Current.MinWorkerThreads.Value, config.Current.MinIoThreads.Value);
+                tds.Information($"Attempt to update min threads to {config.Current.MinWorkerThreads.Value}, {config.Current.MinIoThreads.Value}, success: {success}");
             }
 
             // Get the local user auth provider, if present and attach it first
@@ -179,7 +166,7 @@ namespace NuGetGallery
                 // Send to AppInsights
                 try
                 {
-                    var telemetryClient = new TelemetryClient();
+                    var telemetryClient = DependencyResolver.Current.GetService<ITelemetryClient>();
                     telemetryClient.TrackException(exArgs.Exception, new Dictionary<string, string>()
                     {
                         {"ExceptionOrigin", "UnobservedTaskException"}

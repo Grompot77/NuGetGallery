@@ -111,9 +111,11 @@ namespace NuGetGallery
                 searchTerm,
                 page: 1,
                 includePrerelease: true,
+                packageType: null,
                 sortOrder: null,
                 context: SearchFilter.UISearchContext,
-                semVerLevel: SemVerLevelKey.SemVerLevel2);
+                semVerLevel: SemVerLevelKey.SemVerLevel2,
+                includeTestData: false);
 
             searchFilter.Take = 10;
 

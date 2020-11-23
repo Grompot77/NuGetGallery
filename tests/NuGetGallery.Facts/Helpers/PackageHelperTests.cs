@@ -3,8 +3,10 @@
 
 using System.Collections.Generic;
 using System.Linq;
+using NuGet.Frameworks;
 using NuGet.Packaging;
 using NuGet.Services.Entities;
+using NuGet.Versioning;
 using NuGetGallery.Packaging;
 using Xunit;
 
@@ -26,10 +28,14 @@ namespace NuGetGallery.Helpers
         }
 
         [Theory]
-        [InlineData("http://nuget.org/", false, "http://nuget.org/", true)]
+        [InlineData("http://nuget.org/", false, "https://nuget.org/", true)]
         [InlineData("http://nuget.org/", true, "https://nuget.org/", true)]
         [InlineData("https://nuget.org/", false, "https://nuget.org/", true)]
         [InlineData("https://nuget.org/", true, "https://nuget.org/", true)]
+        [InlineData("http://nugettest.org/", false, "https://nugettest.org/", true)]
+        [InlineData("http://nugettest.org/", true, "https://nugettest.org/", true)]
+        [InlineData("https://nugettest.org/", false, "https://nugettest.org/", true)]
+        [InlineData("https://nugettest.org/", true, "https://nugettest.org/", true)]
         [InlineData("http://www.github.com/", false, "https://www.github.com/", true)]
         [InlineData("http://www.github.com/", true, "https://www.github.com/", true)]
         [InlineData("https://www.github.com/", false, "https://www.github.com/", true)]
@@ -70,6 +76,10 @@ namespace NuGetGallery.Helpers
         [InlineData("http://www.mono-project.com/", true, "https://www.mono-project.com/", true)]
         [InlineData("https://www.mono-project.com/", false, "https://www.mono-project.com/", true)]
         [InlineData("https://www.mono-project.com/", true, "https://www.mono-project.com/", true)]
+        [InlineData("http://www.odata.org/", false, "https://www.odata.org/", true)]
+        [InlineData("http://www.odata.org/", true, "https://www.odata.org/", true)]
+        [InlineData("https://www.odata.org/", false, "https://www.odata.org/", true)]
+        [InlineData("https://www.odata.org/", true, "https://www.odata.org/", true)]
         [InlineData("git://nuget.org", true, null, false)]
         [InlineData("git://nuget.org", false, null, false)]
         public void PrepareUrlForRenderingTest(string input, bool alwaysRewriteHttp, string expectedOutput, bool expectConversion)

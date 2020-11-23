@@ -6,8 +6,7 @@
 }
 
 @section TopScripts{
-    @Styles.Render("~/Content/themes/custom/jqueryui")
-    @Styles.Render("~/Content/page-support-requests")
+    @Styles.Render("~/Content/themes/custom/page-support-requests.min.css")
 }
 
 @ViewHelpers.AjaxAntiForgeryToken(Html)
@@ -87,7 +86,7 @@
 </section>
 
 @section BottomScripts{
-    @Scripts.Render("~/Scripts/page-support-requests")
+    @Scripts.Render("~/Scripts/page-support-requests.min.js")
 
     <script type="text/javascript">
         $(function () {
@@ -109,7 +108,7 @@
                         data: window.nuget.addAjaxAntiForgeryToken(model),
                         success: success
                     })
-                    .error(error);
+                    .fail(error);
                 };
             }
             function EditAdminViewModel() {
@@ -133,7 +132,7 @@
                         data: window.nuget.addAjaxAntiForgeryToken(model),
                         success: success
                     })
-                    .error(error);
+                    .fail(error);
                 };
             }
 
@@ -195,7 +194,7 @@
                                 $self.refresh();
                             }
                         })
-                        .error(function (jqXhr, textStatus, errorThrown) {
+                        .fail(function (jqXhr, textStatus, errorThrown) {
                             alert("Error: " + errorThrown);
                         });
                     }
@@ -214,7 +213,7 @@
                             $self.styleButtons();
                         }
                     })
-                    .error(function (jqXhr, textStatus, errorThrown) {
+                    .fail(function (jqXhr, textStatus, errorThrown) {
                         alert("Error: " + errorThrown);
                     });
                 };

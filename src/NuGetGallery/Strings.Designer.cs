@@ -866,6 +866,15 @@ namespace NuGetGallery {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Please refer to the {0} for steps to resolve this issue..
+        /// </summary>
+        public static string DirectUserToUnmanagedTenantFAQ {
+            get {
+                return ResourceManager.GetString("DirectUserToUnmanagedTenantFAQ", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to The password login is discontinued and has been removed for your account. Please use your Microsoft account to log into {0} going forward..
         /// </summary>
         public static string DiscontinuedLogin_PasswordRemoved {
@@ -1283,6 +1292,24 @@ namespace NuGetGallery {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to This OData endpoint has been disabled. Please refer to the following URL for more information about this deprecation: https://aka.ms/nuget/odata-deprecation.
+        /// </summary>
+        public static string ODataDisabled {
+            get {
+                return ResourceManager.GetString("ODataDisabled", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The combination of parameters provided to this OData endpoint is no longer supported. Please refer to the following URL for more information about this deprecation: https://aka.ms/nuget/odata-deprecation.
+        /// </summary>
+        public static string ODataParametersDisabled {
+            get {
+                return ResourceManager.GetString("ODataParametersDisabled", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to You have successfully confirmed the organization email address..
         /// </summary>
         public static string OrganizationEmailConfirmed {
@@ -1418,6 +1445,15 @@ namespace NuGetGallery {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to The package upload failed due to the client disconnecting..
+        /// </summary>
+        public static string PackageUploadCancelled {
+            get {
+                return ResourceManager.GetString("PackageUploadCancelled", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Package versions that differ only by metadata cannot be uploaded. A package with ID &apos;{0}&apos; and version &apos;{1}&apos; already exists and cannot be modified..
         /// </summary>
         public static string PackageVersionDiffersOnlyByMetadataAndCannotBeModified {
@@ -1540,6 +1576,15 @@ namespace NuGetGallery {
         public static string ReadMeMaxLengthExceeded {
             get {
                 return ResourceManager.GetString("ReadMeMaxLengthExceeded", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The readme is not editable with the package has the embedded readme.
+        /// </summary>
+        public static string ReadmeNotEditableWithEmbeddedReadme {
+            get {
+                return ResourceManager.GetString("ReadmeNotEditableWithEmbeddedReadme", resourceCulture);
             }
         }
         
@@ -2274,6 +2319,15 @@ namespace NuGetGallery {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to There was an unexpected error when submitting feedback. Please contact NuGet support..
+        /// </summary>
+        public static string TwoFAFeedback_Error {
+            get {
+                return ResourceManager.GetString("TwoFAFeedback_Error", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to The uploaded package&apos;s id is too similar to the already existing packages: {0} .
         /// </summary>
         public static string TyposquattingCheckFails {
@@ -2400,6 +2454,15 @@ namespace NuGetGallery {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to The &lt;readme&gt; element is not currently supported..
+        /// </summary>
+        public static string UploadPackage_EmbeddedReadmeNotAccepted {
+            get {
+                return ResourceManager.GetString("UploadPackage_EmbeddedReadmeNotAccepted", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to The {0} file &apos;{1}&apos; does not exist in the package..
         /// </summary>
         public static string UploadPackage_FileDoesNotExist {
@@ -2508,11 +2571,65 @@ namespace NuGetGallery {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to The readme file has an invalid extension &apos;{0}&apos;. Extension must be one of the following: {1}..
+        /// </summary>
+        public static string UploadPackage_InvalidReadmeFileExtension {
+            get {
+                return ResourceManager.GetString("UploadPackage_InvalidReadmeFileExtension", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to the name of &lt;readme&gt; element is case sensitive, must use the &lt;readme&gt;.
+        /// </summary>
+        public static string UploadPackage_InvalidReadmeName {
+            get {
+                return ResourceManager.GetString("UploadPackage_InvalidReadmeName", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Learn more about including a license within the package.
+        /// </summary>
+        public static string UploadPackage_LearMore_PackagingLicense {
+            get {
+                return ResourceManager.GetString("UploadPackage_LearMore_PackagingLicense", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Learn more.
         /// </summary>
         public static string UploadPackage_LearnMore {
             get {
                 return ResourceManager.GetString("UploadPackage_LearnMore", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Learn more about icon URL deprecation.
+        /// </summary>
+        public static string UploadPackage_LearnMore_IconUrlDeprecation {
+            get {
+                return ResourceManager.GetString("UploadPackage_LearnMore_IconUrlDeprecation", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Learn more about invalid license URL encoding.
+        /// </summary>
+        public static string UploadPackage_LearnMore_InvalidLicenseUrlEncoding {
+            get {
+                return ResourceManager.GetString("UploadPackage_LearnMore_InvalidLicenseUrlEncoding", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Learn more about license URL deprecation.
+        /// </summary>
+        public static string UploadPackage_LearnMore_LicenseUrlDreprecation {
+            get {
+                return ResourceManager.GetString("UploadPackage_LearnMore_LicenseUrlDreprecation", resourceCulture);
             }
         }
         
@@ -2634,6 +2751,15 @@ namespace NuGetGallery {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to The package contains one or more duplicated files in the same folder..
+        /// </summary>
+        public static string UploadPackage_PackageContainsDuplicatedEntries {
+            get {
+                return ResourceManager.GetString("UploadPackage_PackageContainsDuplicatedEntries", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to The package contains too many files and/or folders..
         /// </summary>
         public static string UploadPackage_PackageContainsTooManyEntries {
@@ -2676,6 +2802,24 @@ namespace NuGetGallery {
         public static string UploadPackage_PackageIsSignedButMissingCertificate_RequiredSigner {
             get {
                 return ResourceManager.GetString("UploadPackage_PackageIsSignedButMissingCertificate_RequiredSigner", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to readme.
+        /// </summary>
+        public static string UploadPackage_ReadmeFileType {
+            get {
+                return ResourceManager.GetString("UploadPackage_ReadmeFileType", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The readme file must be plain text using UTF-8 encoding..
+        /// </summary>
+        public static string UploadPackage_ReadmeMustBePlainText {
+            get {
+                return ResourceManager.GetString("UploadPackage_ReadmeMustBePlainText", resourceCulture);
             }
         }
         
@@ -3009,15 +3153,6 @@ namespace NuGetGallery {
         public static string WarningNotHttpsRepositoryUrlScheme {
             get {
                 return ResourceManager.GetString("WarningNotHttpsRepositoryUrlScheme", resourceCulture);
-            }
-        }
-        
-        /// <summary>
-        ///   Looks up a localized string similar to This package will only be available to download with SemVer 2.0.0 compatible NuGet clients, such as Visual Studio 2017 (version 15.3) and above or NuGet client 4.3 and above. For more information, see https://go.microsoft.com/fwlink/?linkid=852248..
-        /// </summary>
-        public static string WarningSemVer2PackagePushed {
-            get {
-                return ResourceManager.GetString("WarningSemVer2PackagePushed", resourceCulture);
             }
         }
         

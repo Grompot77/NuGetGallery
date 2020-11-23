@@ -131,12 +131,15 @@
             </div>
             <!-- /ko -->
 
-            <!-- ko if: $data.LicenseFileContents -->
             <div class="verify-package-field common-licenses">
                 <label class="verify-package-field-heading">License file</label>
+                <!-- ko if: $data.LicenseFileContentsHtml -->
+                <span data-bind="html: $data.LicenseFileContentsHtml"></span>
+                <!-- /ko -->
+                <!-- ko ifnot: $data.LicenseFileContentsHtml -->
                 <pre class="license-file-contents custom-license-container" data-bind="text: $data.LicenseFileContents"></pre>
+                <!-- /ko -->
             </div>
-            <!-- /ko -->
 
             <!-- ko if: !$data.LicenseExpression && !$data.LicenseFileContents && !$data.LicenseExpressionSegments -->
             <div class="verify-package-field">
@@ -251,23 +254,13 @@
                 </div>
             </div>
             <!-- /ko -->
+            <!-- ko if: $data.ReadmeFileContents -->
+            <div class="verify-package-field readme">
+                <label class="verify-package-field-heading">Readme File</label>
+                <div class="readme-container" data-bind="html: $data.ReadmeFileContents"></div>
+            </div>
+            <!-- /ko -->
             <!-- /ko -->
         </div>
-
-        <!-- ko if: $data.IsSemVer2 -->
-        @ViewHelpers.AlertWarning(@<text>
-            <!-- ko if: $data.HasSemVer2Version -->
-            This package has a SemVer 2.0.0 package version.<br />
-            <!-- /ko -->
-            <!-- ko if: !$data.HasSemVer2Version && $data.HasSemVer2Dependency -->
-            This package is considered a SemVer 2.0.0 package as it has a package dependency on SemVer 2.0.0 package(s).<br />
-            <!-- /ko -->
-            <em>
-                This package will only be available to download with SemVer 2.0.0 compatible NuGet clients, such as Visual
-                Studio 2017 (version 15.3) and above or NuGet client 4.3.0 and above.
-                <a href="https://go.microsoft.com/fwlink/?linkid=852248" alt="Read more">Read more</a><br />
-            </em>
-            </text>)
-        <!-- /ko -->
     </div>
 </script>

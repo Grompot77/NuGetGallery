@@ -18,12 +18,25 @@ namespace NuGetGallery
     public interface IPackageService : ICorePackageService
     {
         /// <summary>
+        /// Returns a package dependents object that includes a collection of the top packages that 
+        /// depend on the focus package and a total count of those dependents.
+        /// </summary>
+        /// <param name="id">The package ID.</param>
+        PackageDependents GetPackageDependents(string id);
+
+        /// <summary>
         /// Returns all packages with an <see cref="Package.Id"/> of <paramref name="id"/>.
         /// Includes deprecation fields based on <paramref name="deprecationFields"/>.
         /// </summary>
         IReadOnlyCollection<Package> FindPackagesById(
             string id, 
             PackageDeprecationFieldsToInclude deprecationFields = PackageDeprecationFieldsToInclude.None);
+
+        /// <summary>
+        /// Returns all packages with an <see cref="Package.Id"/> of <paramref name="id"/>.
+        /// Includes the <see cref="Package.PackageRegistration"/> fields based on <paramref name="includePackageRegistration"/>.
+        /// </summary>
+        IReadOnlyCollection<Package> FindPackagesById(string id, bool includePackageRegistration);
 
         /// <summary>
         /// Gets the package with the given ID and version when exists;
@@ -67,6 +80,9 @@ namespace NuGetGallery
             IReadOnlyCollection<Package> packages,
             int? semVerLevelKey = SemVerLevelKey.SemVer2,
             bool allowPrerelease = true);
+
+        Package FilterLatestPackageBySuffix(IReadOnlyCollection<Package> packages,
+            string version, bool prerelease);
 
         IEnumerable<Package> FindPackagesByOwner(User user, bool includeUnlisted, bool includeVersions = false);
 

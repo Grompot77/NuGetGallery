@@ -24,6 +24,8 @@ namespace NuGetGallery
 
         public string SemVerLevel { get; set; }
 
+        public string PackageType { get; set; }
+
         public SortOrder SortOrder { get; set; }
 
         public string SupportedFramework { get; set; }
@@ -34,6 +36,8 @@ namespace NuGetGallery
         public bool CountOnly { get; set; }
 
         public bool IncludeAllVersions { get; set; }
+
+        public bool IncludeTestData { get; set; }
 
         /// <summary>
         /// Constructs a new search filter

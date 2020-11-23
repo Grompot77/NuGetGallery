@@ -15,7 +15,6 @@ using System.Web.Optimization;
 using System.Web.Routing;
 using System.Web.UI;
 using Elmah;
-using Microsoft.WindowsAzure.Diagnostics;
 using Microsoft.WindowsAzure.ServiceRuntime;
 using NuGetGallery;
 using NuGetGallery.Configuration;
@@ -47,18 +46,6 @@ namespace NuGetGallery
 
             ViewEngines.Engines.Clear();
             ViewEngines.Engines.Add(CreateViewEngine());
-
-            try
-            {
-                if (RoleEnvironment.IsAvailable)
-                {
-                    CloudPreStart();
-                }
-            }
-            catch
-            {
-                // Azure SDK not available!
-            }
         }
 
         public static void PostStart()
@@ -110,15 +97,10 @@ namespace NuGetGallery
             return ret;
         }
 
-        private static void CloudPreStart()
-        {
-            Trace.Listeners.Add(new DiagnosticMonitorTraceListener());
-        }
-
         private static void BundlingPostStart()
         {
             // Add primary style bundle
-            Bundle stylesBundle = new StyleBundle("~/Content/css");
+            Bundle stylesBundle = new StyleBundle("~/Content/css.min.css");
             foreach (string filename in new[] {
                     "Site.css",
                     "Layout.css",
@@ -142,11 +124,15 @@ namespace NuGetGallery
                 .Include("~/Content/gallery/css/fabric.css");
             BundleTable.Bundles.Add(newStyleBundle);
 
+            var instrumentationBundle = new ScriptBundle("~/Scripts/gallery/instrumentation.min.js")
+                .Include("~/Scripts/gallery/instrumentation.js");
+            BundleTable.Bundles.Add(instrumentationBundle);
+
             var scriptBundle = new ScriptBundle("~/Scripts/gallery/site.min.js")
                 .Include("~/Scripts/gallery/jquery-3.4.1.js")
                 .Include("~/Scripts/gallery/jquery.validate-1.16.0.js")
                 .Include("~/Scripts/gallery/jquery.validate.unobtrusive-3.2.6.js")
-                .Include("~/Scripts/gallery/knockout-3.4.2.js")
+                .Include("~/Scripts/gallery/knockout-3.5.1.js")
                 .Include("~/Scripts/gallery/bootstrap.js")
                 .Include("~/Scripts/gallery/moment-2.18.1.js")
                 .Include("~/Scripts/gallery/common.js")
@@ -162,6 +148,14 @@ namespace NuGetGallery
             var multiSelectDropdownBundle = new ScriptBundle("~/Scripts/gallery/common-multi-select-dropdown.min.js")
                 .Include("~/Scripts/gallery/common-multi-select-dropdown.js");
             BundleTable.Bundles.Add(multiSelectDropdownBundle);
+
+            var asyncFileUploadScriptBundle = new ScriptBundle("~/Scripts/gallery/async-file-upload.min.js")
+                .Include("~/Scripts/gallery/async-file-upload.js");
+            BundleTable.Bundles.Add(asyncFileUploadScriptBundle);
+
+            var certificatesScriptBundle = new ScriptBundle("~/Scripts/gallery/certificates.min.js")
+                .Include("~/Scripts/gallery/certificates.js");
+            BundleTable.Bundles.Add(certificatesScriptBundle);
 
             var homeScriptBundle = new ScriptBundle("~/Scripts/gallery/page-home.min.js")
                 .Include("~/Scripts/gallery/page-home.js");
@@ -222,16 +216,13 @@ namespace NuGetGallery
                 new ScriptResourceDefinition { Path = scriptBundle.Path });
 
             // Add support requests bundles
-            var jQueryUiStylesBundle = new StyleBundle("~/Content/themes/custom/jqueryui")
-                .Include("~/Content/themes/custom/jquery-ui-1.10.3.custom.css");
-            BundleTable.Bundles.Add(jQueryUiStylesBundle);
-
-            var supportRequestStylesBundle = new StyleBundle("~/Content/page-support-requests")
+            var supportRequestStylesBundle = new StyleBundle("~/Content/themes/custom/page-support-requests.min.css")
+                .Include("~/Content/themes/custom/jquery-ui-1.10.3.custom.css")
                 .Include("~/Content/admin/SupportRequestStyles.css");
             BundleTable.Bundles.Add(supportRequestStylesBundle);
 
-            var supportRequestsBundle = new ScriptBundle("~/Scripts/page-support-requests")
-                .Include("~/Scripts/gallery/jquery-ui-{version}.js")
+            var supportRequestsBundle = new ScriptBundle("~/Scripts/page-support-requests.min.js")
+                .Include("~/Scripts/gallery/jquery-ui-1.10.3.js")
                 .Include("~/Scripts/gallery/knockout-projections.js")
                 .Include("~/Scripts/gallery/page-support-requests.js");
             BundleTable.Bundles.Add(supportRequestsBundle);
@@ -255,6 +246,7 @@ namespace NuGetGallery
             GlobalFilters.Filters.Add(new ReadOnlyModeErrorFilter());
             GlobalFilters.Filters.Add(new AntiForgeryErrorFilter());
             GlobalFilters.Filters.Add(new UserDeletedErrorFilter());
+            GlobalFilters.Filters.Add(new RequestValidationExceptionFilter());
             ValueProviderFactories.Factories.Add(new HttpHeaderValueProviderFactory());
         }
 
@@ -265,11 +257,6 @@ namespace NuGetGallery
             if (indexingJobFactory != null)
             {
                 indexingJobFactory.RegisterBackgroundJobs(jobs, configuration);
-            }
-
-            if (configuration.CollectPerfLogs)
-            {
-                jobs.Add(CreateLogFlushJob());
             }
 
             if (configuration.StorageType == StorageType.AzureStorage)
@@ -293,31 +280,6 @@ namespace NuGetGallery
                 _jobManager.Fail(e => ErrorLog.GetDefault(null).Log(new Error(e)));
                 _jobManager.Start();
             }
-        }
-
-        private static ProcessPerfEvents CreateLogFlushJob()
-        {
-            var logDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "App_Data", "Logs");
-            try
-            {
-                if (RoleEnvironment.IsAvailable)
-                {
-                    var resource = RoleEnvironment.GetLocalResource("Logs");
-                    if (resource != null)
-                    {
-                        logDirectory = Path.Combine(resource.RootPath);
-                    }
-                }
-            }
-            catch
-            {
-                // Meh, so Azure isn't available...
-            }
-            return new ProcessPerfEvents(
-                TimeSpan.FromSeconds(10),
-                logDirectory,
-                new[] { "ExternalSearchService" },
-                timeout: TimeSpan.FromSeconds(10));
         }
 
         private static void BackgroundJobsStop()

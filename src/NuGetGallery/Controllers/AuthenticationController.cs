@@ -3,12 +3,14 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Linq;
 using System.Net;
 using System.Net.Mail;
 using System.Security.Claims;
 using System.Threading.Tasks;
+using System.Web;
 using System.Web.Mvc;
 using NuGet.Services.Entities;
 using NuGet.Services.Messaging.Email;
@@ -488,6 +490,7 @@ namespace NuGetGallery
         /// </summary>
         /// <param name="returnUrl">The url to return upon credential replacement</param>
         /// <returns><see cref="ActionResult"/> for returnUrl</returns>
+        [HttpGet]
         public virtual async Task<ActionResult> LinkOrChangeExternalCredential(string returnUrl)
         {
             var user = GetCurrentUser();
@@ -527,13 +530,14 @@ namespace NuGetGallery
                 // The identity value contains cookie non-compliant characters like `<, >`(eg: John Doe <john@doe.com>), 
                 // These need to be replaced so that they are not treated as HTML tags
                 TempData["RawErrorMessage"] = string.Format(Strings.ChangeCredential_Failed,
-                    newCredential.Identity.Replace("<", "&lt;").Replace(">", "&gt;"),
+                    HttpUtility.HtmlEncode(newCredential.Identity),
                     UriExtensions.GetExternalUrlAnchorTag("FAQs page", GalleryConstants.FAQLinks.MSALinkedToAnotherAccount));
             }
 
             return SafeRedirect(returnUrl);
         }
 
+        [SuppressMessage("Security", "CA3147:Mark Verb Handlers With Validate Antiforgery Token", Justification = "Disable antiforgery token validation due to actions handle GET/POST requests")]
         public virtual async Task<ActionResult> LinkExternalAccount(string returnUrl, string error = null, string errorDescription = null)
         {
             // Extract the external login info
@@ -590,15 +594,29 @@ namespace NuGetGallery
                     result.Authentication,
                     wasMultiFactorAuthenticated: result?.LoginDetails?.WasMultiFactorAuthenticated ?? false);
 
-                // Update the 2FA if used during login but user does not have it set on their account. Only for personal microsoft accounts.
+                // Update the 2FA if used during login but user does not have it set on their account. Enforced for only personal microsoft accounts
+                // record it in the DB for the AAD accounts.
                 if (result?.LoginDetails != null
                     && result.LoginDetails.WasMultiFactorAuthenticated
                     && !result.Authentication.User.EnableMultiFactorAuthentication
+                    && CredentialTypes.IsExternal(result.Credential))
+                {
+                    await _userService.ChangeMultiFactorAuthentication(result.Authentication.User, enableMultiFactor: true, referrer: "Authentication");
+                    OwinContext.AddClaim(NuGetClaims.EnabledMultiFactorAuthentication);
+                    if (CredentialTypes.IsMicrosoftAccount(result.Credential.Type))
+                    {
+                        TempData["Message"] = Strings.MultiFactorAuth_LoginUpdate;
+                    }
+                }
+
+                // Ask the user to enable multifactor authentication, if the user
+                // 1. Does not have 2FA enabled, and
+                // 2. Signed in with MSA account.
+                var currentUser = result.Authentication.User;
+                if (!currentUser.EnableMultiFactorAuthentication
                     && CredentialTypes.IsMicrosoftAccount(result.Credential.Type))
                 {
-                    await _userService.ChangeMultiFactorAuthentication(result.Authentication.User, enableMultiFactor: true);
-                    OwinContext.AddClaim(NuGetClaims.EnabledMultiFactorAuthentication);
-                    TempData["Message"] = Strings.MultiFactorAuth_LoginUpdate;
+                    TempData[GalleryConstants.AskUserToEnable2FA] = true;
                 }
 
                 return SafeRedirect(returnUrl);
@@ -797,9 +815,22 @@ namespace NuGetGallery
 
         private ActionResult AuthenticationFailureOrExternalLinkExpired(string errorMessage = null)
         {
-            // User got here without an external login cookie (or an expired one)
-            // Send them to the logon action with a message
-            TempData["ErrorMessage"] = string.IsNullOrEmpty(errorMessage) ? Strings.ExternalAccountLinkExpired : errorMessage;
+            // We need a special case here because of https://github.com/NuGet/NuGetGallery/issues/7544. An unmanaged tenant scenario
+            // needs the FAQ URI appended to the AAD error, and we do that here so it appears in the header.
+            if (!string.IsNullOrEmpty(errorMessage) &&
+                errorMessage.IndexOf("AADSTS65005", StringComparison.OrdinalIgnoreCase) > -1 &&
+                errorMessage.IndexOf("unmanaged", StringComparison.OrdinalIgnoreCase) > -1)
+            {
+                TempData["RawErrorMessage"] = errorMessage + "<br/>" + string.Format(Strings.DirectUserToUnmanagedTenantFAQ,
+                    UriExtensions.GetExternalUrlAnchorTag("FAQs page", GalleryConstants.FAQLinks.AccountBelongsToUnmanagedTenant));
+            }
+            else
+            {
+                // User got here without an external login cookie (or an expired one)
+                // Send them to the logon action with a message
+                TempData["ErrorMessage"] = string.IsNullOrEmpty(errorMessage) ? Strings.ExternalAccountLinkExpired : errorMessage;
+            }
+
             return Redirect(Url.LogOn(null, relativeUrl: false));
         }
 

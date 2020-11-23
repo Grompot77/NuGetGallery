@@ -56,10 +56,22 @@ namespace NuGetGallery
            ReadOnly = readOnly;
         }
 
+        public IDisposable WithQueryHint(string queryHint)
+        {
+            if (QueryHint != null)
+            {
+                throw new InvalidOperationException("A query hint is already applied.");
+            }
+
+            return new QueryHintScope(this, queryHint);
+        }
+
         public bool ReadOnly { get; private set; }
+        public string QueryHint { get; private set; }
         public DbSet<Package> Packages { get; set; }
         public DbSet<PackageDeprecation> Deprecations { get; set; }
         public DbSet<PackageRegistration> PackageRegistrations { get; set; }
+        public DbSet<PackageDependency> PackageDependencies { get; set; }
         public DbSet<Credential> Credentials { get; set; }
         public DbSet<Scope> Scopes { get; set; }
         public DbSet<UserSecurityPolicy> UserSecurityPolicies { get; set; }
@@ -67,6 +79,9 @@ namespace NuGetGallery
         public DbSet<Certificate> Certificates { get; set; }
         public DbSet<UserCertificate> UserCertificates { get; set; }
         public DbSet<SymbolPackage> SymbolPackages { get; set; }
+        public DbSet<PackageVulnerability> Vulnerabilities { get; set; }
+        public DbSet<VulnerablePackageVersionRange> VulnerableRanges { get; set; }
+        public DbSet<PackageRename> PackageRenames { get; set; }
 
         /// <summary>
         /// User or organization accounts.
@@ -449,7 +464,71 @@ namespace NuGetGallery
                 .WithMany()
                 .HasForeignKey(d => d.DeprecatedByUserKey)
                 .WillCascadeOnDelete(false);
+
+            modelBuilder.Entity<PackageVulnerability>()
+                .HasKey(v => v.Key)
+                .HasMany(v => v.AffectedRanges)
+                .WithRequired(pv => pv.Vulnerability)
+                .HasForeignKey(pv => pv.VulnerabilityKey);
+
+            modelBuilder.Entity<PackageVulnerability>()
+                .HasIndex(v => v.GitHubDatabaseKey)
+                .IsUnique();
+
+            modelBuilder.Entity<PackageVulnerability>()
+                .Property(pv => pv.AdvisoryUrl)
+                .IsRequired();
+
+            modelBuilder.Entity<VulnerablePackageVersionRange>()
+                .HasKey(pv => pv.Key)
+                .HasMany(pv => pv.Packages)
+                .WithMany(p => p.Vulnerabilities);
+
+            modelBuilder.Entity<VulnerablePackageVersionRange>()
+                .HasIndex(pv => pv.PackageId);
+
+            modelBuilder.Entity<VulnerablePackageVersionRange>()
+                .HasIndex(pv => new { pv.VulnerabilityKey, pv.PackageId, pv.PackageVersionRange })
+                .IsUnique();
+
+            modelBuilder.Entity<PackageRename>()
+                .HasKey(r => r.Key)
+                .HasIndex(r => r.TransferPopularity);
+
+            modelBuilder.Entity<PackageRename>()
+                .HasIndex(r => new { r.FromPackageRegistrationKey, r.ToPackageRegistrationKey})
+                .IsUnique();
+
+            modelBuilder.Entity<PackageRename>()
+                .HasRequired(r => r.FromPackageRegistration)
+                .WithMany(rg => rg.PackageRenames)
+                .HasForeignKey(r => r.FromPackageRegistrationKey)
+                .WillCascadeOnDelete(true);
+
+            // Cascade deletion on the reference key "ToPackageRegistrationKey" will cause the multiple cascade path issue.
+            // Package registration deletion will delete the related "PackageRename" entities whose "ToPackageRegistrationKey" refers it.
+            modelBuilder.Entity<PackageRename>()
+                .HasRequired(r => r.ToPackageRegistration)
+                .WithMany()
+                .HasForeignKey(r => r.ToPackageRegistrationKey)
+                .WillCascadeOnDelete(false);
         }
 #pragma warning restore 618
+
+        private class QueryHintScope : IDisposable
+        {
+            private readonly EntitiesContext _entitiesContext;
+
+            public QueryHintScope(EntitiesContext entitiesContext, string queryHint)
+            {
+                _entitiesContext = entitiesContext ?? throw new ArgumentNullException(nameof(entitiesContext));
+                _entitiesContext.QueryHint = queryHint;
+            }
+
+            public void Dispose()
+            {
+                _entitiesContext.QueryHint = null;
+            }
+        }
     }
 }

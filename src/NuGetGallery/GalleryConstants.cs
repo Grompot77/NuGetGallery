@@ -27,7 +27,7 @@ namespace NuGetGallery
         public const int GravatarCacheDurationSeconds = 300;
 
         public const int MaxEmailSubjectLength = 255;
-        internal static readonly NuGetVersion MaxSupportedMinClientVersion = new NuGetVersion("4.1.0.0");
+        internal static readonly NuGetVersion MaxSupportedMinClientVersion = new NuGetVersion("5.7.0.0");
         public const string PackageFileDownloadUriTemplate = "packages/{0}/{1}/download";
 
         public const string ReadMeFileSavePathTemplateActive = "active/{0}/{1}{2}";
@@ -44,7 +44,7 @@ namespace NuGetGallery
 
         public static readonly string ReturnUrlViewDataKey = "ReturnUrl";
         public static readonly string ReturnUrlMessageViewDataKey = "ReturnUrlMessage";
-        public const string AbsoluteLatestUrlString = "absoluteLatest";
+        public const string AskUserToEnable2FA = "AskUserToEnable2FA";
 
         public const string UrlValidationRegEx = @"(https?):\/\/[^ ""]+$";
         public const string UrlValidationErrorMessage = "This doesn't appear to be a valid HTTP/HTTPS URL";
@@ -113,6 +113,23 @@ namespace NuGetGallery
             public const string NuGetChangeUsername = "https://aka.ms/nuget-faq-change-username";
             public const string NuGetDeleteAccount = "https://aka.ms/nuget-faq-delete-account";
             public const string TransformToOrganization = "https://aka.ms/nuget-faq-transform-org";
+            public const string AccountBelongsToUnmanagedTenant = "https://aka.ms/nuget-faq-unmanaged-tenant";
+        }
+
+        /// <summary>
+        /// These sort names represent the possible options that the search service supports for sorting packages.
+        /// </summary>
+        public static class SearchSortNames
+        {
+            public const string Relevance = "relevance";
+            public const string LastEdited = "lastEdited";
+            public const string Published = "published";
+            public const string TitleAsc = "title-asc";
+            public const string TitleDesc = "title-desc";
+            public const string CreatedAsc = "created-asc";
+            public const string CreatedDesc = "created-desc";
+            public const string TotalDownloadsAsc = "totalDownloads-asc";
+            public const string TotalDownloadsDesc = "totalDownloads-desc";
         }
     }
 }

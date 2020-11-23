@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
+using System.Collections.Generic;
 
 namespace NuGetGallery.FunctionalTests.ErrorHandling
 {
@@ -32,13 +33,25 @@ namespace NuGetGallery.FunctionalTests.ErrorHandling
                     path = "/api/simulate-error";
                     break;
                 case EndpointType.OData:
-                    path = "/api/v2/curated-feed/microsoftdotnet/SimulateError()";
+                    path = "/api/v1/SimulateError()";
                     break;
                 default:
                     throw new NotImplementedException("The endpoint type is not supported.");
             }
 
             return $"{path}?type={SimulatedErrorType}";
+        }
+
+        public IReadOnlyDictionary<string, string> GetCookies()
+        {
+            var cookies = new Dictionary<string, string>();
+
+            if (SimulatedErrorType == SimulatedErrorType.ExceptionInDedicatedErrorPage)
+            {
+                cookies["simulatedErrorType"] = SimulatedErrorType.ToString();
+            }
+
+            return cookies;
         }
 
         public override bool Equals(object obj)

@@ -1,16 +1,16 @@
 $(function () {
     'use strict';
 
+    // Configure the rename information container
+    window.nuget.configureExpander("rename-content-container", "ChevronDown", null, "ChevronUp");
+    configureExpanderWithEnterKeydown($('#show-rename-content-container'));
+
     // Configure the deprecation information container
     var container = $('#show-deprecation-content-container');
     if ($('#deprecation-content-container').children().length) {
         // If the deprecation information container has content, configure it as an expander.
         window.nuget.configureExpander("deprecation-content-container", "ChevronDown", null, "ChevronUp");
-        container.keydown(function (event) {
-            if (event.which === 13) { // Enter
-                $(event.target).click();
-            }
-        });
+        configureExpanderWithEnterKeydown(container)
     }
     else {
         // If the container does not have content, remove its expander attributes
@@ -23,6 +23,15 @@ $(function () {
         container.find('.deprecation-expander').removeAttr('role');
 
         $('#deprecation-expander-icon-right').hide();
+    }
+
+    // Configure expander with enter keydown event
+    function configureExpanderWithEnterKeydown(container) {
+        container.keydown(function (event) {
+            if (event.which === 13) { // Enter
+                $(event.target).click();
+            }
+        });
     }
 
     // Configure ReadMe container
@@ -55,7 +64,7 @@ $(function () {
 
     // Configure expanders
     window.nuget.configureExpanderHeading("dependency-groups");
-    window.nuget.configureExpanderHeading("github-usage");
+    window.nuget.configureExpanderHeading("used-by");
     window.nuget.configureExpanderHeading("version-history");
     window.nuget.configureExpander(
         "hidden-versions",
@@ -76,6 +85,11 @@ $(function () {
             setTimeout(function () {
                 copyButton.popover('destroy');
             }, 1000);
+            window.nuget.sendMetric("CopyInstallCommand", 1, {
+                ButtonId: id,
+                PackageId: packageId,
+                PackageVersion: packageVersion
+            });
         });
     }  
 
@@ -112,42 +126,29 @@ $(function () {
             ga('send', 'event', 'dependencies', e.type);
         });
 
-        // Emit a Google Analytics event when the user expands or collapses the GitHub Usage section.
-        $("#github-usage").on('hide.bs.collapse show.bs.collapse', function (e) {
-            ga('send', 'event', 'github-usage', e.type);
+        // Emit a Google Analytics event when the user expands or collapses the Used By section.
+        $("#used-by").on('hide.bs.collapse show.bs.collapse', function (e) {
+            ga('send', 'event', 'used-by', e.type);
         });
 
-        // Emit a Google Analytics event when the user clicks on a repo link in the GitHub Usage section.
+        // Emit a Google Analytics event when the user clicks on a repo link in the GitHub Repos area of the Used By section.
         $(".gh-link").on('click', function (elem) {
             if (!elem.delegateTarget.dataset.indexNumber) {
                 console.error("indexNumber property doesn't exist!");
             } else {
-                let linkIndex = elem.delegateTarget.dataset.indexNumber;
+                var linkIndex = elem.delegateTarget.dataset.indexNumber;
                 ga('send', 'event', 'github-usage', 'link-click-' + linkIndex);
             }
         });
-    }
 
-    // Add smooth scrolling to dependent-repos-link
-    $("#dependent-repos-link").on('click', function (event) {
-        // Emit a Google Analytics event
-        if (window.nuget.isGaAvailable()) {
-            ga('send', 'event', 'github-usage', 'sidebar-link-click');
-        }
-
-        if (this.hash !== "") {
-            event.preventDefault();
-            let hash = this.hash;
-            let hashElem = $(hash);
-            if (hashElem.attr("aria-expanded") == "false") {
-                hashElem.click();
+        // Emit a Google Analytics event when the user clicks on a package link in the NuGet Packages area of the Used By section.
+        $(".ngp-link").on('click', function (elem) {
+            if (!elem.delegateTarget.dataset.indexNumber) {
+                console.error("indexNumber property doesn't exist!");
+            } else {
+                var linkIndex = elem.delegateTarget.dataset.indexNumber;
+                ga('send', 'event', 'used-by-packages', 'link-click-' + linkIndex);
             }
-            $('html, body').animate({
-                scrollTop: hashElem.offset().top
-            }, 400, function () {
-                // Add hash (#) to URL when done scrolling (default click behavior)
-                window.location.hash = hash;
-            });
-        }
-    });
+        });
+    }
 });

@@ -12,9 +12,12 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Web;
 using System.Web.Mvc;
+
 using Moq;
+
 using NuGet.Services.Entities;
 using NuGet.Services.Messaging.Email;
+
 using NuGetGallery.Areas.Admin;
 using NuGetGallery.Areas.Admin.Models;
 using NuGetGallery.Areas.Admin.ViewModels;
@@ -24,6 +27,7 @@ using NuGetGallery.Framework;
 using NuGetGallery.Infrastructure.Authentication;
 using NuGetGallery.Infrastructure.Mail.Messages;
 using NuGetGallery.Security;
+
 using Xunit;
 
 namespace NuGetGallery
@@ -1517,7 +1521,7 @@ namespace NuGetGallery
 
                 var userServiceMock = GetMock<IUserService>();
                 userServiceMock
-                    .Setup(x => x.ChangeMultiFactorAuthentication(user, enable2FA))
+                    .Setup(x => x.ChangeMultiFactorAuthentication(user, enable2FA, null))
                     .Returns(Task.CompletedTask)
                     .Verifiable();
 
@@ -1525,7 +1529,7 @@ namespace NuGetGallery
                 var result = await controller.ChangeMultiFactorAuthentication(enable2FA);
 
                 // Assert
-                userServiceMock.Verify(x => x.ChangeMultiFactorAuthentication(user, enable2FA));
+                userServiceMock.Verify(x => x.ChangeMultiFactorAuthentication(user, enable2FA, It.IsAny<string>()));
                 Assert.NotNull(controller.TempData["Message"]);
                 var identity = controller.OwinContext.Authentication.User.Identity as ClaimsIdentity;
                 Assert.NotNull(identity);
@@ -3292,7 +3296,6 @@ namespace NuGetGallery
                 _certificate = new Certificate()
                 {
                     Key = 2,
-                    Sha1Thumbprint = "b",
                     Thumbprint = "c"
                 };
             }
@@ -3354,7 +3357,7 @@ namespace NuGetGallery
 
                 Assert.True(viewModel.CanDelete);
                 Assert.Equal($"/account/certificates/{_certificate.Thumbprint}", viewModel.DeleteUrl);
-                Assert.Equal(_certificate.Sha1Thumbprint, viewModel.Sha1Thumbprint);
+                Assert.Equal(_certificate.Thumbprint, viewModel.Thumbprint);
                 Assert.Equal(JsonRequestBehavior.AllowGet, response.JsonRequestBehavior);
                 Assert.Equal((int)HttpStatusCode.OK, _controller.Response.StatusCode);
 
@@ -3381,7 +3384,6 @@ namespace NuGetGallery
                 _certificate = new Certificate()
                 {
                     Key = 2,
-                    Sha1Thumbprint = "b",
                     Thumbprint = "c"
                 };
             }
@@ -3430,7 +3432,7 @@ namespace NuGetGallery
 
                 Assert.True(viewModel.CanDelete);
                 Assert.Equal($"/account/certificates/{_certificate.Thumbprint}", viewModel.DeleteUrl);
-                Assert.Equal(_certificate.Sha1Thumbprint, viewModel.Sha1Thumbprint);
+                Assert.Equal(_certificate.Thumbprint, viewModel.Thumbprint);
                 Assert.Equal(JsonRequestBehavior.AllowGet, response.JsonRequestBehavior);
                 Assert.Equal((int)HttpStatusCode.OK, _controller.Response.StatusCode);
 
@@ -3461,7 +3463,6 @@ namespace NuGetGallery
                 _certificate = new Certificate()
                 {
                     Key = 2,
-                    Sha1Thumbprint = "b",
                     Thumbprint = "c"
                 };
             }
@@ -3589,7 +3590,6 @@ namespace NuGetGallery
                 _certificate = new Certificate()
                 {
                     Key = 2,
-                    Sha1Thumbprint = "b",
                     Thumbprint = "c"
                 };
             }
@@ -3708,43 +3708,115 @@ namespace NuGetGallery
 
         public class ThePackagesAction : TestContainer
         {
+            private UsersController _testController;
+            private User _testUser;
+            private string userName = "RegularUser";
+            private Fakes _fakes;
+
+            public ThePackagesAction()
+            {
+                _testController = GetController<UsersController>();
+                _fakes = Get<Fakes>();
+                _testUser = _fakes.CreateUser(userName);
+                _testUser.IsDeleted = false;
+                _testUser.Key = 1;
+                _testController.SetCurrentUser(_testUser);
+            }
+
+            private PackageRegistration CreatePackageRegistration(string Id, int Key, string Version, string Description)
+            {
+                var packageRegistration = new PackageRegistration();
+                packageRegistration.Id = Id;
+                packageRegistration.Owners.Add(_testUser);
+
+                var userPackage1 = new Package()
+                {
+                    Key = Key,
+                    Version = Version,
+                    PackageRegistration = packageRegistration,
+                    Description = Description
+                };
+                packageRegistration.Packages.Add(userPackage1);
+                return packageRegistration;
+            }
+
+            [Fact]
+            public void PackagesAreSortedById()
+            {
+                PackageRegistration packageRegistration1 = CreatePackageRegistration("Company.ZebraPackage", 1, "1.0.0", "last");
+                PackageRegistration packageRegistration2 = CreatePackageRegistration("Company.AlphaPackage", 1, "1.0.0", "first");
+                PackageRegistration packageRegistration3 = CreatePackageRegistration("Company.NormalPackage", 1, "1.0.0", "middle");
+
+                var userPackages = new List<Package>() { 
+                    packageRegistration1.Packages.First() ,
+                    packageRegistration2.Packages.First(),
+                    packageRegistration3.Packages.First()
+                };
+
+                GetMock<IUserService>()
+                    .Setup(stub => stub.FindByUsername(userName, false))
+                    .Returns(_testUser);
+
+                GetMock<IPackageService>()
+                    .Setup(stub => stub.FindPackagesByAnyMatchingOwner(_testUser, It.IsAny<bool>(), false))
+                    .Returns(userPackages);
+
+                var model = ResultAssert.IsView<ManagePackagesViewModel>(_testController.Packages());
+
+                Assert.Equal("Company.AlphaPackage", model.ListedPackages.ToArray()[0].Id);
+                Assert.Equal("Company.NormalPackage", model.ListedPackages.ToArray()[1].Id);
+                Assert.Equal("Company.ZebraPackage", model.ListedPackages.ToArray()[2].Id);
+            }
+
+            [Fact]
+            public void PackagesVersionSortOrderIsSetBySemVer()  
+            {
+                PackageRegistration packageRegistration1 = CreatePackageRegistration("Company.ZebraPackage", 1, "1.0.0", "middle");
+                PackageRegistration packageRegistration2 = CreatePackageRegistration("Company.NormalPackage", 1, "0.0.1", "first");
+                PackageRegistration packageRegistration3 = CreatePackageRegistration("Company.AlphaPackage", 1, "1.1.0", "last");
+
+                var userPackages = new List<Package>() {
+                    packageRegistration1.Packages.First() ,
+                    packageRegistration2.Packages.First(),
+                    packageRegistration3.Packages.First()
+                };
+
+                GetMock<IUserService>()
+                    .Setup(stub => stub.FindByUsername(userName, false))
+                    .Returns(_testUser);
+
+                GetMock<IPackageService>()
+                    .Setup(stub => stub.FindPackagesByAnyMatchingOwner(_testUser, It.IsAny<bool>(), false))
+                    .Returns(userPackages);
+
+                var model = ResultAssert.IsView<ManagePackagesViewModel>(_testController.Packages());
+
+                // The "VersionSortOrder" should be set according to Semantic Version sort order, not package Id
+                Assert.Equal(0, model.ListedPackages.First(x => x.Version == "0.0.1").VersionSortOrder);
+                Assert.Equal(1, model.ListedPackages.First(x => x.Version == "1.0.0").VersionSortOrder);
+                Assert.Equal(2, model.ListedPackages.First(x => x.Version == "1.1.0").VersionSortOrder);
+            }
+
             [Fact]
             public void UsesProperIconUrl()
             {
-                string userName = "RegularUser";
-                var controller = GetController<UsersController>();
-                var fakes = Get<Fakes>();
-                var testUser = fakes.CreateUser(userName);
-                testUser.IsDeleted = false;
-                testUser.Key = 1;
-                controller.SetCurrentUser(testUser);
-
-                var packageRegistration = new PackageRegistration();
-                packageRegistration.Owners.Add(testUser);
-
-                var userPackage = new Package()
-                {
-                    Description = "TestPackage",
-                    Key = 1,
-                    Version = "1.0.0",
-                    PackageRegistration = packageRegistration,
-                };
-                packageRegistration.Packages.Add(userPackage);
-
+                PackageRegistration packageRegistration1 = CreatePackageRegistration("TestPackage", 1, "1.0.0", "TestPackage");
+                Package userPackage = packageRegistration1.Packages.First();
                 var userPackages = new List<Package>() { userPackage };
 
                 const string iconUrl = "https://some.test/icon";
+
                 GetMock<IIconUrlProvider>()
                     .Setup(iup => iup.GetIconUrlString(It.IsAny<Package>()))
                     .Returns(iconUrl);
                 GetMock<IUserService>()
                     .Setup(stub => stub.FindByUsername(userName, false))
-                    .Returns(testUser);
+                    .Returns(_testUser);
                 GetMock<IPackageService>()
-                    .Setup(stub => stub.FindPackagesByAnyMatchingOwner(testUser, It.IsAny<bool>(), false))
+                    .Setup(stub => stub.FindPackagesByAnyMatchingOwner(_testUser, It.IsAny<bool>(), false))
                     .Returns(userPackages);
 
-                var model = ResultAssert.IsView<ManagePackagesViewModel>(controller.Packages());
+                var model = ResultAssert.IsView<ManagePackagesViewModel>(_testController.Packages());
 
                 GetMock<IIconUrlProvider>()
                     .Verify(iup => iup.GetIconUrlString(userPackage), Times.AtLeastOnce);

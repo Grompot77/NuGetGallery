@@ -1,6 +1,7 @@
 ﻿// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
+using System.Collections.Generic;
 using NuGet.Services.Entities;
 
 namespace NuGetGallery
@@ -42,9 +43,13 @@ namespace NuGetGallery
 
         /// <summary>
         /// Whether or not the user can manage their package's deprecation state.
-        /// If disabled, 
         /// </summary>
         bool IsManageDeprecationEnabled(User user, PackageRegistration registration);
+
+        /// <summary>
+        /// Whether or not the user can manage their package's deprecation state.
+        /// </summary>
+        bool IsManageDeprecationEnabled(User user, IEnumerable<Package> allVersions);
 
         /// <summary>
         /// Whether or not the user can manage their package's deprecation state through the API.
@@ -74,7 +79,23 @@ namespace NuGetGallery
         /// <param name="user">The user to test for the Flight</param>
         /// <returns>Whether or not the Flight is enabled for the user</returns>
         bool IsGitHubUsageEnabled(User user);
-        
+
+        /// <summary>
+        /// Whether a user can see the "Advanced Search" panel in the packages list view as well as use the 
+        /// advanced search request parameters
+        /// </summary>
+        /// <param name="user">The user to test for the Flight</param>
+        /// <returns>Whether or not the Flight is enabled for the user</returns>
+        bool IsAdvancedSearchEnabled(User user);
+
+        /// <summary>
+        /// Whether a user can see the "Package Dependents" section in a package's display page. Also, no
+        /// data is gathered from the database
+        /// </summary>
+        /// <param name="user">The user to test for the Flight</param>
+        /// <returns>Whether or not the Flight is enabled for the user</returns>
+        bool IsPackageDependentsEnabled(User user);
+
         /// <summary>
         /// Whether the OData controllers use the read-only replica.
         /// </summary>
@@ -94,5 +115,115 @@ namespace NuGetGallery
         /// Whether Gravatar images should be proxied.
         /// </summary>
         bool IsGravatarProxyEnabled();
+
+        /// <summary>
+        /// Whether the "en.gravatar.com" subdomain should be used to proxy Gravatar images.
+        /// This is ignored if <see cref="IsGravatarProxyEnabled"/> is <see langword="false"/>.
+        /// </summary>
+        bool ProxyGravatarEnSubdomain();
+
+        /// <summary>
+        /// Whether or not to check the content object service for OData cache durations.
+        /// </summary>
+        bool AreDynamicODataCacheDurationsEnabled();
+
+        /// <summary>
+        /// Whether the qualified users should be shown the dialog box to enable multi-factor authentication
+        /// </summary>
+        bool IsShowEnable2FADialogEnabled();
+
+        /// <summary>
+        /// Whether we should get feedback from the users when they dismiss enabling multi-factor authentication
+        /// </summary>
+        bool IsGet2FADismissFeedbackEnabled();
+
+        /// <summary>
+        /// Whether we should enable the Usabilla feedback button on every page.
+        /// </summary>
+        bool IsUsabillaButtonEnabledOnEveryPage();
+
+        /// <summary>
+        /// Whether the user is able to see or manage the package renames information.
+        /// </summary>
+        bool IsPackageRenamesEnabled(User user);
+
+        /// <summary>
+        /// Whether the user is able to publish the package with an embedded readme file.
+        /// </summary>
+        bool AreEmbeddedReadmesEnabled(User user);
+
+        /// <summary>
+        /// Whether the /Packages() endpoint is enabled for the V1 OData API.
+        /// </summary>
+        bool IsODataV1GetAllEnabled();
+
+        /// <summary>
+        /// Whether the /Packages()/$count endpoint is enabled for the V1 OData API.
+        /// </summary>
+        bool IsODataV1GetAllCountEnabled();
+
+        /// <summary>
+        /// Whether the /Packages(Id=,Version=) endpoint is enabled for non-hijacked queries for the V1 OData API.
+        /// </summary>
+        bool IsODataV1GetSpecificNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether the /FindPackagesById() endpoint is enabled for non-hijacked queries for the V1 OData API.
+        /// </summary>
+        bool IsODataV1FindPackagesByIdNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether the /FindPackagesById()/$count endpoint is enabled for non-hijacked queries for the V1 OData API.
+        /// </summary>
+        bool IsODataV1FindPackagesByIdCountNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether the /Search() endpoint is enabled for non-hijacked queries for the V1 OData API.
+        /// </summary>
+        bool IsODataV1SearchNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether the /Search()/$count endpoint is enabled for non-hijacked queries for the V1 OData API.
+        /// </summary>
+        bool IsODataV1SearchCountNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether the /Packages() endpoint is enabled for non-hijacked queries for the V2 OData API.
+        /// </summary>
+        bool IsODataV2GetAllNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether the /Packages()/$count endpoint is enabled for non-hijacked queries for the V2 OData API.
+        /// </summary>
+        bool IsODataV2GetAllCountNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether the /Packages(Id=,Version=) endpoint is enabled for non-hijacked queries for the V2 OData API.
+        /// </summary>
+        bool IsODataV2GetSpecificNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether the /FindPackagesById() endpoint is enabled for non-hijacked queries for the V2 OData API.
+        /// </summary>
+        bool IsODataV2FindPackagesByIdNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether the /FindPackagesById()/$count endpoint is enabled for non-hijacked queries for the V2 OData API.
+        /// </summary>
+        bool IsODataV2FindPackagesByIdCountNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether the /Search() endpoint is enabled for non-hijacked queries for the V2 OData API.
+        /// </summary>
+        bool IsODataV2SearchNonHijackedEnabled();
+
+        /// <summary>
+        /// Whether rendering licence Markdown content to HTML is enabled
+        /// </summary>
+        bool IsLicenseMdRenderingEnabled(User user);
+
+        /// Whether the /Search()/$count endpoint is enabled for non-hijacked queries for the V2 OData API.
+        /// </summary>
+        bool IsODataV2SearchCountNonHijackedEnabled();
     }
 }

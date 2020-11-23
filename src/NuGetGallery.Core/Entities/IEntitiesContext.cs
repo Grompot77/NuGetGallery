@@ -12,6 +12,7 @@ namespace NuGetGallery
         DbSet<Certificate> Certificates { get; set; }
         DbSet<PackageDeprecation> Deprecations { get; set; }
         DbSet<PackageRegistration> PackageRegistrations { get; set; }
+        DbSet<PackageDependency> PackageDependencies { get; set; }
         DbSet<Credential> Credentials { get; set; }
         DbSet<Scope> Scopes { get; set; }
         DbSet<User> Users { get; set; }
@@ -19,6 +20,9 @@ namespace NuGetGallery
         DbSet<ReservedNamespace> ReservedNamespaces { get; set; }
         DbSet<UserCertificate> UserCertificates { get; set; }
         DbSet<SymbolPackage> SymbolPackages { get; set; }
+        DbSet<PackageVulnerability> Vulnerabilities { get; set; }
+        DbSet<VulnerablePackageVersionRange> VulnerableRanges { get; set; }
+        DbSet<PackageRename> PackageRenames { get; set; }
 
         Task<int> SaveChangesAsync();
         void DeleteOnCommit<T>(T entity) where T : class;

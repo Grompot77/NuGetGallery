@@ -67,7 +67,7 @@ namespace NuGetGallery
 
             if (returnUri != null)
             {
-                readyUriString = returnUri.ToString();
+                readyUriString = returnUri.AbsoluteUri;
                 return true;
             }
 
@@ -170,6 +170,12 @@ namespace NuGetGallery
                 if (packageDependencies.Flatten().Length > Int16.MaxValue)
                 {
                     throw new EntityException(ServicesStrings.NuGetPackagePropertyTooLong, "Dependencies", Int16.MaxValue);
+                }
+
+                // Verify there are no duplicate dependency groups
+                if (packageDependencies.Select(pd => pd.TargetFramework).Distinct().Count() != packageDependencies.Count)
+                {
+                    throw new EntityException(ServicesStrings.NuGetPackageDuplicateDependencyGroup);
                 }
             }
 

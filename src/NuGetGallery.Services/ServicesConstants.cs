@@ -46,6 +46,11 @@ namespace NuGetGallery
 
         public const string ApiKeyHeaderName = "X-NuGet-ApiKey";
 
+        /// <summary>
+        /// Parameter for passing the cookie compliance permission.
+        /// </summary>
+        public const string CookieComplianceCanWriteAnalyticsCookies = "CanWriteAnalyticsCookies";
+
         public static class ContentNames
         {
             public static readonly string LoginDiscontinuationConfiguration = "Login-Discontinuation-Configuration";
@@ -54,6 +59,9 @@ namespace NuGetGallery
             public static readonly string TyposquattingConfiguration = "Typosquatting-Configuration";
             public static readonly string NuGetPackagesGitHubDependencies = "GitHubUsage.v1";
             public static readonly string ABTestConfiguration = "AB-Test-Configuration";
+            public static readonly string ODataCacheConfiguration = "OData-Cache-Configuration";
+            public static readonly string CacheConfiguration = "Cache-Configuration";
+            public static readonly string QueryHintConfiguration = "Query-Hint-Configuration";
         }
     }
 }

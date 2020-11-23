@@ -9,6 +9,7 @@ using System.Linq;
 using NuGet.Packaging;
 using NuGet.Packaging.Core;
 using NuGet.Versioning;
+using NuGetGallery.TestUtils;
 using Xunit;
 
 namespace NuGetGallery.Packaging
@@ -88,6 +89,44 @@ namespace NuGetGallery.Packaging
             // Act & Assert
             var ex = Assert.Throws<PackagingException>(() => PackageMetadata.FromNuspecReader(nuspec, strict: false));
             Assert.Equal($"The package manifest contains an invalid boolean value for metadata element: '{name}'. The value should be 'true' or 'false'.", ex.Message);
+        }
+
+        [Theory]
+        [InlineData("Bad package type")]
+        [InlineData("Bad--packageType")]
+        [InlineData("Bad..packageType")]
+        [InlineData("Bad!!packageType")]
+        public void RejectsInvalidPackageTypeName(string name)
+        {
+            // Arrange
+            var packageStream = CreateTestPackageStreamWithPackageTypes("Dependency", name);
+            var nupkg = new PackageArchiveReader(packageStream, leaveStreamOpen: false);
+            var nuspec = nupkg.GetNuspecReader();
+
+            // Act & Assert
+            var ex = Assert.Throws<PackagingException>(() => PackageMetadata.FromNuspecReader(nuspec, strict: false));
+            Assert.Equal($"The package manifest contains an invalid package type name: '{name}'", ex.Message);
+        }
+
+        [Theory]
+        [InlineData("goodpackagetype")]
+        [InlineData("GoodPackageType")]
+        [InlineData("    GoodPackageType    ")]
+        [InlineData("good__packageType")]
+        public void RejectsValidPackageTypeName(string name)
+        {
+            // Arrange
+            var packageStream = CreateTestPackageStreamWithPackageTypes(name);
+            var nupkg = new PackageArchiveReader(packageStream, leaveStreamOpen: false);
+            var nuspec = nupkg.GetNuspecReader();
+
+            // Act
+            var metadata = PackageMetadata.FromNuspecReader(nuspec, strict: false);
+
+            // Assert
+            var packageType = Assert.Single(metadata.GetPackageTypes());
+            Assert.Equal(name.Trim(), packageType.Name);
+            Assert.Equal(new Version(0, 0), packageType.Version);
         }
 
         [Theory]
@@ -177,7 +216,8 @@ namespace NuGetGallery.Packaging
 
             // Act & Assert
             var ex = Assert.Throws<ArgumentException>(() => PackageMetadata.FromNuspecReader(nuspec, strict));
-            Assert.Equal("'bad' is not a valid version string.\r\nParameter name: value", ex.Message);
+            Assert.StartsWith("'bad' is not a valid version string.", ex.Message);
+            Assert.Equal("value", ex.ParamName);
         }
 
         [Fact]
@@ -211,6 +251,7 @@ namespace NuGetGallery.Packaging
         }
 
         [Fact]
+        [UseInvariantCultureAttribute]
         public void ThrowsForEmptyAndNonEmptyDuplicatesWhenDuplicateMetadataElementsDetectedAndParsingIsNotStrict()
         {
             // Arrange
@@ -222,9 +263,10 @@ namespace NuGetGallery.Packaging
             var ex = Assert.Throws<ArgumentException>(() => PackageMetadata.FromNuspecReader(
                 nuspec,
                 strict: false));
+
             Assert.Equal(
-                "An item with the same key has already been added.",
-                ex.Message);
+               "An item with the same key has already been added.",
+               ex.Message);
         }
 
         [Fact]
@@ -425,6 +467,24 @@ namespace NuGetGallery.Packaging
                         <foo>2</foo>
                         <releaseNotes></releaseNotes>
                         <releaseNotes></releaseNotes>
+                      </metadata>
+                    </package>");
+        }
+
+        private static Stream CreateTestPackageStreamWithPackageTypes(params string[] packageTypes)
+        {
+            var packageTypeElements = packageTypes
+                .Select(x => $"<packageType name=\"{x}\" />")
+                .ToList();
+
+            return CreateTestPackageStream($@"<?xml version=""1.0""?>
+                    <package xmlns=""http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd"">
+                      <metadata>
+                        <id>TestPackage</id>
+                        <version>0.0.0.1</version>
+                        <packageTypes>
+                          {string.Join(string.Empty, packageTypeElements)}
+                        </packageTypes>
                       </metadata>
                     </package>");
         }

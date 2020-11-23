@@ -1,9 +1,8 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Web;
@@ -34,7 +33,9 @@ namespace NuGetGallery.Infrastructure.Search
             get { return false; }
         }
 
-        public bool ContainsAllVersions { get { return true; } }
+        public bool ContainsAllVersions => true;
+
+        public bool SupportsAdvancedSearch => true;
 
         public ExternalSearchService(IDiagnosticsService diagnostics, ISearchClient searchClient)
         {
@@ -56,12 +57,11 @@ namespace NuGetGallery.Infrastructure.Search
         private async Task<SearchResults> SearchCore(SearchFilter filter, bool raw)
         {
             // Query!
-            var sw = new Stopwatch();
-            sw.Start();
             var result = await _searchClient.Search(
                 filter.SearchTerm,
                 projectTypeFilter: null,
                 includePrerelease: filter.IncludePrerelease,
+                packageType: filter.PackageType,
                 sortBy: filter.SortOrder,
                 skip: filter.Skip,
                 take: filter.Take,
@@ -70,8 +70,8 @@ namespace NuGetGallery.Infrastructure.Search
                 explain: false,
                 getAllVersions: filter.IncludeAllVersions,
                 supportedFramework: filter.SupportedFramework,
-                semVerLevel: filter.SemVerLevel);
-            sw.Stop();
+                semVerLevel: filter.SemVerLevel,
+                includeTestData: filter.IncludeTestData);
 
             SearchResults results = null;
             if (result.IsSuccessStatusCode)
@@ -102,19 +102,6 @@ namespace NuGetGallery.Infrastructure.Search
 
                 results = new SearchResults(0, null, Enumerable.Empty<Package>().AsQueryable(), responseMessage: result.HttpResponse);
             }
-
-            Trace.PerfEvent(
-                SearchRoundtripTimePerfCounter,
-                sw.Elapsed,
-                new Dictionary<string, object>() {
-                    {"Term", filter.SearchTerm},
-                    {"Context", filter.Context},
-                    {"Raw", raw},
-                    {"Hits", results == null ? -1 : results.Hits},
-                    {"StatusCode", (int)result.StatusCode},
-                    {"SortOrder", filter.SortOrder.ToString()},
-                    {"Url", TryGetUrl()}
-                });
 
             return results;
         }

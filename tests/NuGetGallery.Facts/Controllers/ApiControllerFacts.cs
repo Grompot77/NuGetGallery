@@ -10,6 +10,7 @@ using System.IO;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Net;
+using System.Security.Principal;
 using System.Threading.Tasks;
 using System.Web;
 using System.Web.Mvc;
@@ -64,7 +65,8 @@ namespace NuGetGallery
             IGalleryConfigurationService configurationService,
             MockBehavior behavior = MockBehavior.Default,
             ISecurityPolicyService securityPolicyService = null,
-            IUserService userService = null)
+            IUserService userService = null,
+            Mock<HttpResponseBase> responseMock = null)
         {
             SetOwinContextOverride(Fakes.CreateOwinContext());
             ApiScopeEvaluator = (MockApiScopeEvaluator = new Mock<IApiScopeEvaluator>()).Object;
@@ -159,6 +161,12 @@ namespace NuGetGallery
             requestMock.Setup(m => m.IsSecureConnection).Returns(true);
             requestMock.Setup(m => m.Url).Returns(new Uri(TestUtility.GallerySiteRootHttps));
 
+            if (responseMock == null)
+            {
+                responseMock = new Mock<HttpResponseBase>();
+                responseMock.Setup(m => m.IsClientConnected).Returns(true);
+            }
+
             var httpContextMock = new Mock<HttpContextBase>();
             httpContextMock.Setup(m => m.Request).Returns(requestMock.Object);
 
@@ -190,7 +198,6 @@ namespace NuGetGallery
     public class ApiControllerFacts
     {
         private static readonly Uri HttpRequestUrl = new Uri("http://nuget.org/api/v2/something");
-        private static readonly Uri HttpsRequestUrl = new Uri("https://nuget.org/api/v2/something");
 
         public static IEnumerable<object[]> InvalidScopes_Data
         {
@@ -242,6 +249,33 @@ namespace NuGetGallery
                 // Assert
                 Assert.NotNull(result);
                 ResultAssert.IsStatusCode(result, HttpStatusCode.BadRequest);
+            }
+
+            [Fact]
+            public async Task CreateSymbolPackage_TracksClientDisconnectedWithoutFailureMetric()
+            {
+                // Arrange
+                var responseMock = new Mock<HttpResponseBase>();
+                responseMock.Setup(x => x.IsClientConnected).Returns(false);
+
+                var controller = new TestableApiController(GetConfigurationService(), responseMock: responseMock);
+                controller.SetCurrentUser(new User() { EmailAddress = "confirmed@email.com" });
+                controller.MockSymbolPackageUploadService
+                    .Setup(p => p.ValidateUploadedSymbolsPackage(
+                        It.IsAny<Stream>(),
+                        It.IsAny<User>()))
+                    .Throws(new HttpException());
+
+                controller.SetupPackageFromInputStream(TestPackage.CreateTestSymbolPackageStream());
+
+                // Act
+                var result = await controller.CreateSymbolPackagePutAsync();
+
+                // Assert
+                ResultAssert.IsStatusCode(result, HttpStatusCode.BadRequest, "The package upload failed due to the client disconnecting.");
+                controller.MockTelemetryService.Verify(x => x.TrackSymbolPackagePushDisconnectEvent(), Times.Once);
+                controller.MockTelemetryService.Verify(x => x.TrackSymbolPackagePushEvent(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+                controller.MockTelemetryService.Verify(x => x.TrackSymbolPackagePushFailureEvent(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
             }
 
             [Fact]
@@ -454,6 +488,36 @@ namespace NuGetGallery
 
                 // Assert
                 controller.MockTelemetryService.Verify(x => x.TrackPackagePushFailureEvent(null, null), Times.Once());
+            }
+
+            [Fact]
+            public async Task CreatePackage_TracksClientDisconnectedWithoutFailureMetric()
+            {
+                // Arrange
+                var responseMock = new Mock<HttpResponseBase>();
+                responseMock.Setup(x => x.IsClientConnected).Returns(false);
+
+                var controller = new TestableApiController(GetConfigurationService(), responseMock: responseMock);
+                controller.SetCurrentUser(new User() { EmailAddress = "confirmed@email.com" });
+                controller.MockPackageUploadService
+                    .Setup(p => p.GeneratePackageAsync(
+                        It.IsAny<string>(),
+                        It.IsAny<PackageArchiveReader>(),
+                        It.IsAny<PackageStreamMetadata>(),
+                        It.IsAny<User>(),
+                        It.IsAny<User>()))
+                    .Throws(new HttpException());
+
+                controller.SetupPackageFromInputStream(TestPackage.CreateTestPackageStream());
+
+                // Act
+                var result = await controller.CreatePackagePut();
+
+                // Assert
+                ResultAssert.IsStatusCode(result, HttpStatusCode.BadRequest, "The package upload failed due to the client disconnecting.");
+                controller.MockTelemetryService.Verify(x => x.TrackPackagePushDisconnectEvent(), Times.Once);
+                controller.MockTelemetryService.Verify(x => x.TrackPackagePushEvent(It.IsAny<Package>(), It.IsAny<User>(), It.IsAny<IIdentity>()), Times.Never);
+                controller.MockTelemetryService.Verify(x => x.TrackPackagePushFailureEvent(It.IsAny<string>(), It.IsAny<NuGetVersion>()), Times.Never);
             }
 
             [Fact]
@@ -694,6 +758,45 @@ namespace NuGetGallery
                 // Assert
                 ResultAssert.IsStatusCode(result, HttpStatusCode.BadRequest);
                 Assert.Equal(expectExceptionMessageInResponse ? EnsureValidExceptionMessage : Strings.FailedToReadUploadFile, (result as HttpStatusCodeWithBodyResult).StatusDescription);
+            }
+
+            [Fact]
+            public async Task WillRejectBrokenZipFiles()
+            {
+                // Arrange
+                var package = new MemoryStream(TestDataResourceUtility.GetResourceBytes("Zip64Package.Corrupted.1.0.0.nupkg"));
+
+                var user = new User() { EmailAddress = "confirmed@email.com" };
+                var controller = new TestableApiController(GetConfigurationService());
+                controller.SetCurrentUser(user);
+                controller.SetupPackageFromInputStream(package);
+
+                // Act
+                ActionResult result = await controller.CreatePackagePut();
+
+                // Assert
+                ResultAssert.IsStatusCode(result, HttpStatusCode.BadRequest);
+                Assert.Equal(Strings.FailedToReadUploadFile, (result as HttpStatusCodeWithBodyResult).StatusDescription);
+            }
+
+            [Fact]
+            public async Task CreatePackageReturns400IfMinClientVersionIsTooHigh()
+            {
+                // Arrange
+                const string HighClientVerison = "6.0.0.0";
+                var nuGetPackage = TestPackage.CreateTestPackageStream("theId", "1.0.42", minClientVersion: HighClientVerison);
+
+                var user = new User() { EmailAddress = "confirmed@email.com" };
+                var controller = new TestableApiController(GetConfigurationService());
+                controller.SetCurrentUser(user);
+                controller.SetupPackageFromInputStream(nuGetPackage);
+
+                // Act
+                ActionResult result = await controller.CreatePackagePut();
+
+                // Assert
+                ResultAssert.IsStatusCode(result, HttpStatusCode.BadRequest);
+                Assert.Contains(HighClientVerison, (result as HttpStatusCodeWithBodyResult).StatusDescription);
             }
 
             [Theory]
@@ -1023,7 +1126,7 @@ namespace NuGetGallery
             public async Task WillCreateAPackageWithNewRegistration()
             {
                 var packageId = "theId";
-                var nuGetPackage = TestPackage.CreateTestPackageStream(packageId, "1.0.42");
+                var nuGetPackage = TestPackage.CreateTestPackageStream(packageId, "1.0.42", minClientVersion: "1.0.0");
 
                 var currentUser = new User("currentUser") { Key = 1, EmailAddress = "currentUser@confirmed.com" };
                 var controller = new TestableApiController(GetConfigurationService());
@@ -2741,7 +2844,7 @@ namespace NuGetGallery
 
                 var controller = new TestableApiController(GetConfigurationService())
                 {
-                    StatisticsService = new JsonStatisticsService(fakeReportService.Object),
+                    StatisticsService = new JsonStatisticsService(fakeReportService.Object, new DateTimeProvider()),
                 };
 
                 TestUtility.SetupUrlHelperForUrlGeneration(controller);
@@ -2752,8 +2855,8 @@ namespace NuGetGallery
 
                 JArray result = JArray.Parse(contentResult.Content);
 
-                Assert.True((string)result[3]["Gallery"] == "/packages/B/1.1", "unexpected content result[3].Gallery");
-                Assert.True((int)result[2]["Downloads"] == 5, "unexpected content result[2].Downloads");
+                Assert.Equal("/packages/B/1.1.0", (string)result[3]["Gallery"]);
+                Assert.Equal(5, (int)result[2]["Downloads"]);
             }
 
             [Fact]
@@ -2792,7 +2895,7 @@ namespace NuGetGallery
 
                 var controller = new TestableApiController(GetConfigurationService())
                 {
-                    StatisticsService = new JsonStatisticsService(fakeReportService.Object),
+                    StatisticsService = new JsonStatisticsService(fakeReportService.Object, new DateTimeProvider()),
                 };
 
                 TestUtility.SetupUrlHelperForUrlGeneration(controller);

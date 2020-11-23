@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Threading;
 
 namespace NuGetGallery
 {
@@ -18,7 +19,7 @@ namespace NuGetGallery
             YearWeekNumber
         }
 
-        private readonly string[] _magnitudeAbbreviations = new string[] { "", "k", "M", "B", "T", "q", "Q", "s", "S", "o", "n" };
+        private static readonly string[] _magnitudeAbbreviations = new string[] { "", "k", "M", "B", "T", "q", "Q", "s", "S", "o", "n" };
 
         private DateTime? _lastUpdatedUtc;
 
@@ -142,22 +143,45 @@ namespace NuGetGallery
             return (amount / total).ToString("P0", CultureInfo.CurrentCulture);
         }
 
-        public string DisplayShortNumber(long number)
+        public string DisplayShortNumber(double number) => DisplayShortNumber(number, sigFigures: 3);
+
+        internal static string DisplayShortNumber(double number, int sigFigures = 3)
         {
             var numDiv = 0;
 
             while (number >= 1000)
             {
-                number = number / 1000;
+                number /= 1000;
                 numDiv++;
+            }
+
+            // Find a rounding factor based on size, and round to sigFigures, e.g. for 3 sig figs, 1.776545 becomes 1.78.
+            var placeValues = Math.Ceiling(Math.Log10(number));
+            var roundingFactor = Math.Pow(10, sigFigures - placeValues);
+            var roundedNum = Math.Round(number * roundingFactor) / roundingFactor;
+
+            // Pad from right with zeroes to sigFigures length, so for 3 sig figs, 1.6 becomes 1.60
+            var decimalPoint = Thread.CurrentThread.CurrentUICulture.NumberFormat.NumberDecimalSeparator;
+            var formattedNum = roundedNum.ToString("F" + sigFigures, Thread.CurrentThread.CurrentUICulture.NumberFormat);
+            var desiredLength = formattedNum.Contains(decimalPoint) ? sigFigures + decimalPoint.Length : sigFigures;
+            if (formattedNum.Length > desiredLength)
+            {
+                formattedNum = formattedNum.Substring(0, desiredLength);
+            }
+
+            // If trailing char/s is/are decimal point separator, trim it
+            if (formattedNum.Length > decimalPoint.Length && 
+                formattedNum.Substring(formattedNum.Length - decimalPoint.Length, decimalPoint.Length) == decimalPoint)
+            {
+                formattedNum = formattedNum.Substring(0, formattedNum.Length - decimalPoint.Length);
             }
 
             if (numDiv >= _magnitudeAbbreviations.Length)
             {
-                return number + $"10^{numDiv*3}";
+                return formattedNum + $" 10^{numDiv*3}";
             }
-
-            return number + _magnitudeAbbreviations[numDiv];
+            
+            return formattedNum + _magnitudeAbbreviations[numDiv];
         }
     }
 }

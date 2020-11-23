@@ -12,18 +12,20 @@ using System.Threading.Tasks;
 using System.Web;
 using System.Web.Configuration;
 using Microsoft.WindowsAzure.ServiceRuntime;
+using NuGet.Services.Configuration;
 using NuGet.Services.KeyVault;
+using NuGetGallery.Configuration.SecretReader;
 
 namespace NuGetGallery.Configuration
 {
-    public class ConfigurationService : IGalleryConfigurationService
+    public class ConfigurationService : IGalleryConfigurationService, IConfigurationFactory
     {
         protected const string SettingPrefix = "Gallery.";
         protected const string FeaturePrefix = "Feature.";
         protected const string ServiceBusPrefix = "AzureServiceBus.";
         protected const string PackageDeletePrefix = "PackageDelete.";
 
-        private bool _notInCloud;
+        private bool _notInCloudService;
         private readonly Lazy<string> _httpSiteRootThunk;
         private readonly Lazy<string> _httpsSiteRootThunk;
         private readonly Lazy<IAppConfiguration> _lazyAppConfiguration;
@@ -31,7 +33,29 @@ namespace NuGetGallery.Configuration
         private readonly Lazy<IServiceBusConfiguration> _lazyServiceBusConfiguration;
         private readonly Lazy<IPackageDeleteConfiguration> _lazyPackageDeleteConfiguration;
 
+        private static readonly HashSet<string> NotInjectedSettingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
+            SettingPrefix + "SqlServer",
+            SettingPrefix + "SqlServerReadOnlyReplica",
+            SettingPrefix + "SupportRequestSqlServer",
+            SettingPrefix + "ValidationSqlServer" };
+
         public ISecretInjector SecretInjector { get; set; }
+
+        /// <summary>
+        /// Initializes the configuration service and associates a secret injector based on the configured KeyVault
+        /// settings.
+        /// </summary>
+        public static ConfigurationService Initialize()
+        {
+            var configuration = new ConfigurationService();
+            var secretReaderFactory = new SecretReaderFactory(configuration);
+            var secretReader = secretReaderFactory.CreateSecretReader();
+            var secretInjector = secretReaderFactory.CreateSecretInjector(secretReader);
+
+            configuration.SecretInjector = secretInjector;
+
+            return configuration;
+        }
 
         public ConfigurationService()
         {
@@ -65,6 +89,21 @@ namespace NuGetGallery.Configuration
         public string GetSiteRoot(bool useHttps)
         {
             return useHttps ? _httpsSiteRootThunk.Value : _httpSiteRootThunk.Value;
+        }
+
+        public Task<T> Get<T>() where T : NuGet.Services.Configuration.Configuration, new()
+        {
+            // Get the prefix specified by the ConfigurationKeyPrefixAttribute on the class if it exists.
+            var classPrefix = string.Empty;
+            var configNamePrefixProperty = (ConfigurationKeyPrefixAttribute)typeof(T)
+                .GetCustomAttributes(typeof(ConfigurationKeyPrefixAttribute), inherit: true)
+                .FirstOrDefault();
+            if (configNamePrefixProperty != null)
+            {
+                classPrefix = configNamePrefixProperty.Prefix;
+            }
+
+            return ResolveConfigObject(Activator.CreateInstance<T>(), classPrefix);
         }
 
         public async Task<T> ResolveConfigObject<T>(T instance, string prefix)
@@ -119,7 +158,7 @@ namespace NuGetGallery.Configuration
         {
             var value = ReadRawSetting(settingName);
 
-            if (!string.IsNullOrEmpty(value))
+            if (!string.IsNullOrEmpty(value) && !NotInjectedSettingNames.Contains(settingName))
             {
                 value = await SecretInjector.InjectAsync(value);
             }
@@ -131,7 +170,7 @@ namespace NuGetGallery.Configuration
         {
             string value;
 
-            value = GetCloudSetting(settingName);
+            value = GetCloudServiceSetting(settingName);
 
             if (value == "null")
             {
@@ -171,10 +210,10 @@ namespace NuGetGallery.Configuration
             return await ResolveConfigObject(new PackageDeleteConfiguration(), PackageDeletePrefix);
         }
 
-        protected virtual string GetCloudSetting(string settingName)
+        protected virtual string GetCloudServiceSetting(string settingName)
         {
             // Short-circuit if we've already determined we're not in the cloud
-            if (_notInCloud)
+            if (_notInCloudService)
             {
                 return null;
             }
@@ -188,13 +227,13 @@ namespace NuGetGallery.Configuration
                 }
                 else
                 {
-                    _notInCloud = true;
+                    _notInCloudService = true;
                 }
             }
             catch (TypeInitializationException)
             {
                 // Not in the role environment...
-                _notInCloud = true; // Skip future checks to save perf
+                _notInCloudService = true; // Skip future checks to save perf
             }
             catch (Exception)
             {

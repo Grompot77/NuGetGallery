@@ -101,6 +101,7 @@ namespace NuGetGallery.Packaging
             Tags = GetValue(PackageMetadataStrings.Tags, (string)null);
             Language = GetValue(PackageMetadataStrings.Language, (string)null);
             IconFile = GetValue(PackageMetadataStrings.Icon, (string)null);
+            ReadmeFile = GetValue(PackageMetadataStrings.Readme, (string)null);
 
             Owners = GetValue(PackageMetadataStrings.Owners, (string)null);
 
@@ -140,6 +141,12 @@ namespace NuGetGallery.Packaging
         /// Null if not specified.
         /// </summary>
         public string IconFile { get; private set; }
+
+        /// <summary>
+        /// Contains the embedded readme filename taken from the 'readme' node of the nuspec file.
+        /// Null if not specified.
+        /// </summary>
+        public string ReadmeFile { get; private set; }
 
         public string GetValueFromMetadata(string key)
         {
@@ -255,10 +262,21 @@ namespace NuGetGallery.Packaging
                 }
             }
 
+            // Reject invalid package types.
+            foreach (var packageType in nuspecReader.GetPackageTypes())
+            {
+                if (!NuGet.Packaging.PackageIdValidator.IsValidPackageId(packageType.Name))
+                {
+                    throw new PackagingException(string.Format(
+                        CoreStrings.Manifest_InvalidPackageTypeName,
+                        packageType.Name));
+                }
+            }
+
             return new PackageMetadata(
                 nuspecReader.GetMetadata().ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
                 nuspecReader.GetDependencyGroups(useStrictVersionCheck: strict),
-                nuspecReader.GetFrameworkReferenceGroups(),
+                nuspecReader.GetFrameworkAssemblyGroups(),
                 nuspecReader.GetPackageTypes(),
                 nuspecReader.GetMinClientVersion(),
                 nuspecReader.GetRepositoryMetadata(),

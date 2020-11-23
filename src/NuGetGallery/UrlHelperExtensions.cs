@@ -148,6 +148,8 @@ namespace NuGetGallery
             int page,
             string q,
             bool includePrerelease,
+            string packageType,
+            string sortBy,
             bool relativeUrl = true)
         {
             var routeValues = new RouteValueDictionary();
@@ -165,6 +167,16 @@ namespace NuGetGallery
             if (!includePrerelease)
             {
                 routeValues["prerel"] = "false";
+            }
+
+            if (!string.IsNullOrWhiteSpace(packageType))
+            {
+                routeValues["packageType"] = packageType;
+            }
+
+            if (!string.IsNullOrWhiteSpace(sortBy))
+            {
+                routeValues["sortBy"] = sortBy;
             }
 
             return GetActionLink(
@@ -216,6 +228,8 @@ namespace NuGetGallery
             string version,
             bool relativeUrl = true)
         {
+            string normalized = (version != null) ? NuGetVersionFormatter.Normalize(version) : version;
+
             string result = GetRouteLink(
                 url,
                 RouteName.DisplayPackage,
@@ -223,7 +237,7 @@ namespace NuGetGallery
                 routeValues: new RouteValueDictionary
                 {
                     { "id", id },
-                    { "version", version }
+                    { "version", normalized }
                 });
 
             // Ensure trailing slashes for versionless package URLs, as a fix for package filenames that look like known file extensions
@@ -1160,6 +1174,16 @@ namespace NuGetGallery
         public static string SigninAssistance(this UrlHelper url, bool relativeUrl = true)
         {
             return GetRouteLink(url, RouteName.SigninAssistance, relativeUrl);
+        }
+
+        public static string Send2FAFeedback(this UrlHelper url, bool relativeUrl = true)
+        {
+            return GetRouteLink(url, RouteName.Send2FAFeedback, relativeUrl);
+        }
+
+        public static string ChangeMultiFactorAuthentication(this UrlHelper url, bool relativeUrl = true)
+        {
+            return GetRouteLink(url, RouteName.ChangeMultiFactorAuthentication, relativeUrl);
         }
 
         public static RouteUrlTemplate<OwnerRequestsListItemViewModel> ConfirmPendingOwnershipRequestTemplate(

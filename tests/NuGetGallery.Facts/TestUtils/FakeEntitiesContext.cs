@@ -29,6 +29,17 @@ namespace NuGetGallery
                 throw new NotSupportedException();
             }
         }
+        public DbSet<PackageDependency> PackageDependencies
+        {
+            get
+            {
+                return Set<PackageDependency>();
+            }
+            set
+            {
+                throw new NotSupportedException();
+            }
+        }
 
         public DbSet<Package> Packages
         {
@@ -162,6 +173,44 @@ namespace NuGetGallery
             }
         }
 
+        public DbSet<PackageVulnerability> Vulnerabilities
+        {
+            get
+            {
+                return Set<PackageVulnerability>();
+            }
+            set
+            {
+                throw new NotSupportedException();
+            }
+        }
+
+        public DbSet<VulnerablePackageVersionRange> VulnerableRanges
+        {
+            get
+            {
+                return Set<VulnerablePackageVersionRange>();
+            }
+            set
+            {
+                throw new NotSupportedException();
+            }
+        }
+
+        public DbSet<PackageRename> PackageRenames
+        {
+            get
+            {
+                return Set<PackageRename>();
+            }
+            set
+            {
+                throw new NotSupportedException();
+            }
+        }
+
+        public virtual string QueryHint => throw new NotImplementedException();
+
         public Task<int> SaveChangesAsync()
         {
             _areChangesSaved = true;
@@ -264,6 +313,11 @@ namespace NuGetGallery
 
         public void Dispose()
         {
+        }
+
+        public virtual IDisposable WithQueryHint(string queryHint)
+        {
+            throw new NotImplementedException();
         }
     }
 }

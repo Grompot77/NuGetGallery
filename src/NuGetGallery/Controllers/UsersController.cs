@@ -8,9 +8,11 @@ using System.Linq;
 using System.Net;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using System.Web;
 using System.Web.Mvc;
 using NuGet.Services.Entities;
 using NuGet.Services.Messaging.Email;
+using NuGet.Versioning;
 using NuGetGallery.Areas.Admin;
 using NuGetGallery.Areas.Admin.ViewModels;
 using NuGetGallery.Authentication;
@@ -520,16 +522,12 @@ namespace NuGetGallery
             var wasAADLoginOrMultiFactorAuthenticated = User.WasMultiFactorAuthenticated() || User.WasAzureActiveDirectoryAccountUsedForSignin();
 
             var packages = PackageService.FindPackagesByAnyMatchingOwner(currentUser, includeUnlisted: true);
-            var listedPackages = packages
-                .Where(p => p.Listed && p.PackageStatusKey == PackageStatus.Available)
-                .Select(p => _listPackageItemRequiredSignerViewModelFactory.Create(p, currentUser, wasAADLoginOrMultiFactorAuthenticated))
-                .OrderBy(p => p.Id)
-                .ToList();
-            var unlistedPackages = packages
-                .Where(p => !p.Listed || p.PackageStatusKey != PackageStatus.Available)
-                .Select(p => _listPackageItemRequiredSignerViewModelFactory.Create(p, currentUser, wasAADLoginOrMultiFactorAuthenticated))
-                .OrderBy(p => p.Id)
-                .ToList();
+
+            var listedPackages = GetPackages(packages, currentUser, wasAADLoginOrMultiFactorAuthenticated,
+                p => p.Listed && p.PackageStatusKey == PackageStatus.Available);
+            
+            var unlistedPackages = GetPackages(packages, currentUser, wasAADLoginOrMultiFactorAuthenticated,
+                p => !p.Listed || p.PackageStatusKey != PackageStatus.Available);
 
             // find all received ownership requests
             var userReceived = _packageOwnerRequestService.GetPackageOwnershipRequests(newOwner: currentUser);
@@ -564,6 +562,36 @@ namespace NuGetGallery
                 IsCertificatesUIEnabled = ContentObjectService.CertificatesConfiguration?.IsUIEnabledForUser(currentUser) ?? false
             };
             return View(model);
+        }
+
+        /// <summary>
+        /// Returns all packages based on the predicate, with the VersionSortOrder populated
+        /// </summary>
+        /// <param name="packages"></param>
+        /// <param name="currentUser"></param>
+        /// <param name="wasAADLoginOrMultiFactorAuthenticated"></param>
+        /// <param name="predicate"></param>
+        /// <returns></returns>
+        private List<ListPackageItemRequiredSignerViewModel> GetPackages(
+            IEnumerable<Package> packages,
+            User currentUser,
+            bool wasAADLoginOrMultiFactorAuthenticated,
+            Func<Package, bool> predicate)
+        {
+            var listedPackages = packages
+                .Where(p => predicate(p))
+                .Select(p => _listPackageItemRequiredSignerViewModelFactory.Create(p, currentUser, wasAADLoginOrMultiFactorAuthenticated))
+                .OrderBy(p => NuGetVersion.Parse(p.FullVersion))
+                .ToList();
+
+            for (int i = 0; i < listedPackages.Count; i++)
+            {
+                listedPackages[i].VersionSortOrder = i;
+            }
+
+            listedPackages.Sort((x, y) => string.Compare(x.Id, y.Id, StringComparison.OrdinalIgnoreCase));
+
+            return listedPackages;
         }
 
         [HttpGet]
@@ -769,8 +797,9 @@ namespace NuGetGallery
         public virtual async Task<ActionResult> ChangeMultiFactorAuthentication(bool enableMultiFactor)
         {
             var user = GetCurrentUser();
+            var referrer = OwinContext.Request?.Headers?.Get("Referer") ?? "Unknown";
 
-            await UserService.ChangeMultiFactorAuthentication(user, enableMultiFactor);
+            await UserService.ChangeMultiFactorAuthentication(user, enableMultiFactor, referrer);
 
             TempData["Message"] = string.Format(
                 enableMultiFactor ? Strings.MultiFactorAuth_Enabled : Strings.MultiFactorAuth_Disabled,
@@ -788,6 +817,29 @@ namespace NuGetGallery
             }
 
             return RedirectToAction(AccountAction);
+        }
+
+        [HttpPost]
+        [UIAuthorize]
+        [ValidateAntiForgeryToken]
+        public virtual async Task<JsonResult> Send2FAFeedback(string feedback)
+        {
+            try
+            {
+                var user = GetCurrentUser();
+                var sanitizedUserFeedback = HttpUtility.HtmlEncode(feedback);
+
+                var message = new TwoFactorFeedbackMessage(MessageServiceConfiguration, sanitizedUserFeedback, user);
+                await MessageService.SendMessageAsync(message);
+
+                return Json(new { success = true });
+            }
+            catch (ArgumentException ex)
+            {
+                ex.Log();
+
+                return Json(new { success = false, message = Strings.TwoFAFeedback_Error });
+            }
         }
 
         [HttpPost]

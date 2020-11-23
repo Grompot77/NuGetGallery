@@ -81,7 +81,9 @@ namespace NuGetGallery.TestUtils
             UserRepository = new EntityRepository<User>(FakeEntitiesContext);
             RoleRepository = new EntityRepository<Role>(FakeEntitiesContext);
             Auditing = new TestAuditingService();
-            TelemetryService = new TelemetryService();
+            TelemetryService = new TelemetryService(
+                new Mock<IDiagnosticsSource>().Object,
+                new Mock<ITelemetryClient>().Object);
         }
     }
 
@@ -193,6 +195,8 @@ namespace NuGetGallery.TestUtils
             var auditingService = new TestAuditingService();
             var telemetryService = new Mock<ITelemetryService>();
             var securityPolicyService = new Mock<ISecurityPolicyService>();
+            var entitiesContext = new Mock<IEntitiesContext>();
+            var contentObjectService = new Mock<IContentObjectService>();
 
             var packageService = new Mock<PackageService>(
                  packageRegistrationRepository.Object,
@@ -200,7 +204,9 @@ namespace NuGetGallery.TestUtils
                  certificateRepository.Object,
                  auditingService,
                  telemetryService.Object,
-                 securityPolicyService.Object);
+                 securityPolicyService.Object,
+                 entitiesContext.Object,
+                 contentObjectService.Object);
 
             packageService.CallBase = true;
 

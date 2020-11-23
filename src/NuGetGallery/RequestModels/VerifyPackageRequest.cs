@@ -21,10 +21,6 @@ namespace NuGetGallery
             Id = packageMetadata.Id;
             Version = packageMetadata.Version.ToFullStringSafe();
             OriginalVersion = packageMetadata.Version.OriginalVersion;
-            HasSemVer2Version = packageMetadata.Version.IsSemVer2;
-            HasSemVer2Dependency = packageMetadata.GetDependencyGroups().Any(d => d.Packages.Any(
-                                p => (p.VersionRange.HasUpperBound && p.VersionRange.MaxVersion.IsSemVer2)
-                                    || (p.VersionRange.HasLowerBound && p.VersionRange.MinVersion.IsSemVer2)));
             
             // Verifiable fields
             Language = packageMetadata.Language;
@@ -92,10 +88,6 @@ namespace NuGetGallery
         /// </summary>
         public IReadOnlyCollection<string> PossibleOwners { get; set; }
 
-        public bool IsSemVer2 => HasSemVer2Version || HasSemVer2Dependency;
-        public bool HasSemVer2Version { get; set; }
-        public bool HasSemVer2Dependency { get; set; }
-
         // Editable server-state
         public bool Listed { get; set; }
         public EditPackageVersionReadMeRequest Edit { get; set; }
@@ -113,11 +105,13 @@ namespace NuGetGallery
         public string LicenseExpression { get; set; }
         public IReadOnlyCollection<CompositeLicenseExpressionSegmentViewModel> LicenseExpressionSegments { get; set; }
         public string LicenseFileContents { get; set; }
+        public string LicenseFileContentsHtml { get; set; }
         public string MinClientVersionDisplay { get; set; }
         public string ProjectUrl { get; set; }
         public string RepositoryUrl { get; set; }
         public string RepositoryType { get; set; }
         public string ReleaseNotes { get; set; }
+        public string ReadmeFileContents { get; set; }
         public bool RequiresLicenseAcceptance { get; set; }
         public string Summary { get; set; }
         public string Tags { get; set; }

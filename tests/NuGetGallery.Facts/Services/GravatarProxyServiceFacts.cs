@@ -11,6 +11,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Web.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
 using NuGet.Services.Entities;
@@ -32,9 +33,11 @@ namespace NuGetGallery
             EmailAddress = "bar@test.example",
         };
 
-        private const string UserGravatarUrl = "https://secure.gravatar.com/avatar/9394f8a07bb4df241de4660b315f8a90?s=100&r=g&d=retro";
-        private const string UserGravatarUrlSize512 = "https://secure.gravatar.com/avatar/9394f8a07bb4df241de4660b315f8a90?s=512&r=g&d=retro";
-        private const string UnconfirmedUserGravatarUrl = "https://secure.gravatar.com/avatar/9394f8a07bb4df241de4660b315f8a90?s=100&r=g&d=retro";
+        private const string UserGravatarUrl = "https://en.gravatar.com/avatar/9394f8a07bb4df241de4660b315f8a90?s=100&r=g&d=retro";
+        private const string UserGravatarUrlSize512 = "https://en.gravatar.com/avatar/9394f8a07bb4df241de4660b315f8a90?s=512&r=g&d=retro";
+        private const string UnconfirmedUserGravatarUrl = "https://en.gravatar.com/avatar/ae8a9f21ae0da3be811aa63266e8e2f8?s=100&r=g&d=retro";
+
+        private const string UserLegacyGravatarUrl = "https://secure.gravatar.com/avatar/9394f8a07bb4df241de4660b315f8a90?s=100&r=g&d=retro";
 
         private DelegateHttpMessageHandler _messageHandler;
         private Mock<IEntityRepository<User>> _users;
@@ -84,6 +87,8 @@ namespace NuGetGallery
 
             _features
                 .Verify(f => f.IsGravatarProxyEnabled(), Times.Once);
+            _features
+                .Verify(f => f.ProxyGravatarEnSubdomain(), Times.Never);
 
         }
 
@@ -100,8 +105,42 @@ namespace NuGetGallery
 
             _features
                 .Verify(f => f.IsGravatarProxyEnabled(), Times.Once);
+            _features
+                .Verify(f => f.ProxyGravatarEnSubdomain(), Times.Never);
             _users
                 .Verify(u => u.GetAll(), Times.Once);
+        }
+
+        [Fact]
+        public async Task WhenEnSubdomainDisabled_UsesSecureSubdomain()
+        {
+            using (var validGravatarResponse = ValidGravatarResponse)
+            {
+                // Arrange
+                _features
+                    .Setup(f => f.IsGravatarProxyEnabled())
+                    .Returns(true);
+                _features
+                    .Setup(f => f.ProxyGravatarEnSubdomain())
+                    .Returns(false);
+
+                _messageHandler.AddHandler(UserLegacyGravatarUrl, message => validGravatarResponse);
+
+                // Act
+                var result = await _target.GetAvatarOrNullAsync(User.Username, 100);
+
+                // Assert
+                Assert.NotNull(result);
+                Assert.Equal("Hello", ToString(result.AvatarStream));
+                Assert.Equal("image/png; charset=utf-8", result.ContentType);
+
+                _features
+                    .Verify(f => f.IsGravatarProxyEnabled(), Times.Once);
+                _features
+                    .Verify(f => f.ProxyGravatarEnSubdomain(), Times.Once);
+                _users
+                    .Verify(u => u.GetAll(), Times.Once);
+            }
         }
 
         [Fact]
@@ -112,6 +151,9 @@ namespace NuGetGallery
                 // Arrange
                 _features
                     .Setup(f => f.IsGravatarProxyEnabled())
+                    .Returns(true);
+                _features
+                    .Setup(f => f.ProxyGravatarEnSubdomain())
                     .Returns(true);
 
                 _messageHandler.AddHandler(UserGravatarUrl, message => validGravatarResponse);
@@ -126,10 +168,11 @@ namespace NuGetGallery
 
                 _features
                     .Verify(f => f.IsGravatarProxyEnabled(), Times.Once);
+                _features
+                    .Verify(f => f.ProxyGravatarEnSubdomain(), Times.Once);
                 _users
                     .Verify(u => u.GetAll(), Times.Once);
             }
-
         }
 
         [Fact]
@@ -140,6 +183,9 @@ namespace NuGetGallery
                 // Arrange
                 _features
                     .Setup(f => f.IsGravatarProxyEnabled())
+                    .Returns(true);
+                _features
+                    .Setup(f => f.ProxyGravatarEnSubdomain())
                     .Returns(true);
 
                 User.UnconfirmedEmailAddress = "ignored@example.test";
@@ -156,11 +202,14 @@ namespace NuGetGallery
 
                 _features
                     .Verify(f => f.IsGravatarProxyEnabled(), Times.Once);
+                _features
+                    .Verify(f => f.ProxyGravatarEnSubdomain(), Times.Once);
                 _users
                     .Verify(u => u.GetAll(), Times.Once);
             }
         }
 
+        [Fact]
         public async Task FallsbackToUnconfirmedEmailAddress()
         {
             using (var validGravatarResponse = ValidGravatarResponse)
@@ -168,6 +217,9 @@ namespace NuGetGallery
                 // Arrange
                 _features
                     .Setup(f => f.IsGravatarProxyEnabled())
+                    .Returns(true);
+                _features
+                    .Setup(f => f.ProxyGravatarEnSubdomain())
                     .Returns(true);
 
                 _messageHandler.AddHandler(UnconfirmedUserGravatarUrl, message => ValidGravatarResponse);
@@ -182,6 +234,8 @@ namespace NuGetGallery
 
                 _features
                     .Verify(f => f.IsGravatarProxyEnabled(), Times.Once);
+                _features
+                    .Verify(f => f.ProxyGravatarEnSubdomain(), Times.Once);
                 _users
                     .Verify(u => u.GetAll(), Times.Once);
             }
@@ -196,6 +250,9 @@ namespace NuGetGallery
                 _features
                     .Setup(f => f.IsGravatarProxyEnabled())
                     .Returns(true);
+                _features
+                    .Setup(f => f.ProxyGravatarEnSubdomain())
+                    .Returns(true);
 
                 _messageHandler.AddHandler(UserGravatarUrlSize512, message => validGravatarResponse);
 
@@ -209,6 +266,8 @@ namespace NuGetGallery
 
                 _features
                     .Verify(f => f.IsGravatarProxyEnabled(), Times.Once);
+                _features
+                    .Verify(f => f.ProxyGravatarEnSubdomain(), Times.Once);
                 _users
                     .Verify(u => u.GetAll(), Times.Once);
             }
@@ -243,6 +302,9 @@ namespace NuGetGallery
                 _features
                     .Setup(f => f.IsGravatarProxyEnabled())
                     .Returns(true);
+                _features
+                    .Setup(f => f.ProxyGravatarEnSubdomain())
+                    .Returns(true);
 
                 _messageHandler.AddHandler(UserGravatarUrlSize512, message => gravatarResponseWithNoContentType);
 
@@ -256,6 +318,8 @@ namespace NuGetGallery
 
                 _features
                     .Verify(f => f.IsGravatarProxyEnabled(), Times.Once);
+                _features
+                    .Verify(f => f.ProxyGravatarEnSubdomain(), Times.Once);
                 _users
                     .Verify(u => u.GetAll(), Times.Once);
             }

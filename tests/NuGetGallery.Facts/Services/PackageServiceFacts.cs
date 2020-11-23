@@ -3,7 +3,9 @@
 
 using System;
 using System.Collections.Generic;
+using System.Data.Entity;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Moq;
 using NuGet.Frameworks;
@@ -14,6 +16,7 @@ using NuGetGallery.Auditing;
 using NuGetGallery.Framework;
 using NuGetGallery.Packaging;
 using NuGetGallery.Security;
+using NuGetGallery.Services;
 using NuGetGallery.TestUtils;
 using Xunit;
 
@@ -28,7 +31,9 @@ namespace NuGetGallery
             IAuditingService auditingService = null,
             Mock<ITelemetryService> telemetryService = null,
             Mock<ISecurityPolicyService> securityPolicyService = null,
-            Action<Mock<PackageService>> setup = null)
+            Action<Mock<PackageService>> setup = null,
+            Mock<IEntitiesContext> context = null,
+            Mock<IContentObjectService> contentObjectService = null)
         {
             packageRegistrationRepository = packageRegistrationRepository ?? new Mock<IEntityRepository<PackageRegistration>>();
             packageRepository = packageRepository ?? new Mock<IEntityRepository<Package>>();
@@ -36,6 +41,13 @@ namespace NuGetGallery
             auditingService = auditingService ?? new TestAuditingService();
             telemetryService = telemetryService ?? new Mock<ITelemetryService>();
             securityPolicyService = securityPolicyService ?? new Mock<ISecurityPolicyService>();
+            context = context ?? new Mock<IEntitiesContext>();
+
+            if (contentObjectService == null)
+            {
+                contentObjectService = new Mock<IContentObjectService>();
+                contentObjectService.Setup(x => x.QueryHintConfiguration).Returns(Mock.Of<IQueryHintConfiguration>());
+            }
 
             var packageService = new Mock<PackageService>(
                 packageRegistrationRepository.Object,
@@ -43,7 +55,9 @@ namespace NuGetGallery
                 certificateRepository.Object,
                 auditingService,
                 telemetryService.Object,
-                securityPolicyService.Object);
+                securityPolicyService.Object,
+                context.Object,
+                contentObjectService.Object);
 
             packageService.CallBase = true;
 
@@ -53,6 +67,83 @@ namespace NuGetGallery
             }
 
             return packageService.Object;
+        }
+        
+        public class TheFindPackageBySuffixMethod
+        {
+            private Package InvokeMethod(IReadOnlyCollection<Package> packages, string version, bool preRelease)
+            {
+                var service = CreateService();
+                return service.FilterLatestPackageBySuffix(packages, version, preRelease);
+            }
+            
+            [Theory]
+            [InlineData("alpha", true, 4)]
+            [InlineData("alpha2-internal", true, 4)]
+            [InlineData("alpha1", true, 2)]
+            [InlineData("alpha2", true, 4)]
+            [InlineData("alpha3", true, 7)]
+            [InlineData("internal", true, 7)]
+            [InlineData("internal.5", true, 7)]
+            [InlineData("internal.51", true, 7)]
+            [InlineData("internal.6", true, 8)]
+            [InlineData("", true, 7)]
+            [InlineData("", false, 1)]
+            [InlineData("noexist", true, 7)]
+            public void VerifySemVerMatching(string version, bool preRelease, int expectedResultIndex)
+            {
+                var r = new Regex(@"-[^d]");
+                var testData = new[]
+                    {
+                        ("1.0.0", false, false),
+                        ("1.0.23", true, false),
+                        ("1.0.23-alpha1", false, false),
+                        ("1.0.23-alpha2-internal2", false, false),
+                        ("1.0.23-alpha2-internal3", false, false),
+                        ("1.0.23-beta", false, false),
+                        ("1.0.23-internal.5", false, false),
+                        ("1.0.23-internal.510", false, true),
+                        ("1.0.23-internal.6", false, false),
+                    }
+                    .Select(data => new Package() { 
+                        IsPrerelease = r.IsMatch(data.Item1), 
+                        NormalizedVersion = NuGetVersion.Parse(data.Item1).ToNormalizedString(),
+                        IsLatestStableSemVer2 = data.Item2,
+                        IsLatestSemVer2 = data.Item3
+                    })
+                    .ToArray();
+
+                var result = InvokeMethod(testData, version, preRelease);
+                Assert.Equal(testData[expectedResultIndex].NormalizedVersion, result.NormalizedVersion);
+            }
+            
+            [Fact]
+            public void VerifyFallbackToStableIfNoPrerelease()
+            {
+                var r = new Regex(@"-[^d]");
+                var testData = new[]
+                    {
+                        ("1.0.0", 1, false, false),
+                        ("1.0.23", 2, true, false),
+                    }
+                    .Select(data => new Package() { 
+                        IsPrerelease = r.IsMatch(data.Item1), 
+                        NormalizedVersion = SemanticVersion.Parse(data.Item1).ToNormalizedString(),
+                        IsLatestStableSemVer2 = data.Item3,
+                        IsLatestSemVer2 = data.Item4
+                    })
+                    .ToArray();
+
+                var result = InvokeMethod(testData, "alpha", true);
+                Assert.Equal(testData[1].NormalizedVersion, result.NormalizedVersion);
+            }
+            
+            [Fact]
+            public void VerifyDoesNotThrowIfNoPackages()
+            {
+                var result = InvokeMethod(new Package[]{}, "alpha", true);
+                Assert.Equal(null, result);
+            }
         }
 
         public class TheAddPackageOwnerMethod
@@ -206,7 +297,8 @@ namespace NuGetGallery
                     licenseUrl: new Uri("http://thelicenseurl/"),
                     projectUrl: new Uri("http://theprojecturl/"),
                     iconUrl: new Uri("http://theiconurl/"),
-                    licenseFilename: "license.txt");
+                    licenseFilename: "license.txt",
+                    readmeFilename:"readme.md");
                 var currentUser = new User();
 
                 var package = await service.CreatePackageAsync(nugetPackage.Object, new PackageStreamMetadata(), currentUser, currentUser, isVerified: false);
@@ -230,6 +322,7 @@ namespace NuGetGallery
                 Assert.Equal("theTitle", package.Title);
                 Assert.Equal("theCopyright", package.Copyright);
                 Assert.Equal(EmbeddedLicenseFileType.PlainText, package.EmbeddedLicenseType);
+                Assert.Equal(EmbeddedReadmeFileType.Markdown, package.EmbeddedReadmeType);
                 Assert.Null(package.Language);
                 Assert.False(package.IsPrerelease);
 
@@ -360,6 +453,27 @@ namespace NuGetGallery
 
                 Assert.Equal(expectedFileType, package.EmbeddedLicenseType);
                 Assert.Null(package.LicenseExpression);
+            }
+
+            [Theory]
+            [InlineData(null, EmbeddedReadmeFileType.Absent)]
+            [InlineData("readme.md", EmbeddedReadmeFileType.Markdown)]
+            [InlineData("readme.mD", EmbeddedReadmeFileType.Markdown)]
+            public async Task WillDetectReadmeFileType(string readmeFileName, EmbeddedReadmeFileType expectedFileType)
+            {
+                var packageRegistrationRepository = new Mock<IEntityRepository<PackageRegistration>>();
+                var service = CreateService(packageRegistrationRepository: packageRegistrationRepository, setup:
+                        mockPackageService => { mockPackageService.Setup(x => x.FindPackageRegistrationById(It.IsAny<string>())).Returns((PackageRegistration)null); });
+                var nugetPackage = PackageServiceUtility.CreateNuGetPackage(
+                    licenseUrl: new Uri("http://thelicenseurl/"),
+                    projectUrl: new Uri("http://theprojecturl/"),
+                    iconUrl: new Uri("http://theiconurl/"),
+                    readmeFilename: readmeFileName);
+                var currentUser = new User();
+
+                var package = await service.CreatePackageAsync(nugetPackage.Object, new PackageStreamMetadata(), currentUser, currentUser, isVerified: false);
+
+                Assert.Equal(expectedFileType, package.EmbeddedReadmeType);
             }
 
             [Fact]
@@ -649,6 +763,41 @@ namespace NuGetGallery
                 var ex = await Assert.ThrowsAsync<InvalidPackageException>(async () => await service.CreatePackageAsync(nugetPackage.Object, new PackageStreamMetadata(), owner: null, currentUser: null, isVerified: false));
 
                 Assert.Equal(String.Format(Strings.NuGetPackagePropertyTooLong, "Dependency.Id", NuGet.Services.Entities.Constants.MaxPackageIdLength), ex.Message);
+            }
+
+            [Fact]
+            private async Task WillThrowIfThePackageContainsDuplicateDependencyGroups()
+            {
+                var service = CreateService();
+
+                var duplicateDependencyGroup = new PackageDependencyGroup(
+                        new NuGetFramework("net40"),
+                        new[]
+                        {
+                            new NuGet.Packaging.Core.PackageDependency(
+                                "dependency",
+                                VersionRange.Parse("[1.0.0, 2.0.0)")),
+                        });
+
+                var packageDependencyGroups = new[]
+                {
+                    duplicateDependencyGroup,
+                    new PackageDependencyGroup(
+                        new NuGetFramework("net35"),
+                        new[]
+                        {
+                            new NuGet.Packaging.Core.PackageDependency(
+                                "dependency",
+                                VersionRange.Parse("[1.0]"))
+                        }),
+                    duplicateDependencyGroup
+                };
+
+                var nugetPackage = PackageServiceUtility.CreateNuGetPackage(packageDependencyGroups: packageDependencyGroups);
+
+                var ex = await Assert.ThrowsAsync<InvalidPackageException>(async () => await service.CreatePackageAsync(nugetPackage.Object, new PackageStreamMetadata(), owner: null, currentUser: null, isVerified: false));
+
+                Assert.Equal(ServicesStrings.NuGetPackageDuplicateDependencyGroup, ex.Message);
             }
 
             [Fact]
@@ -2020,6 +2169,638 @@ namespace NuGetGallery
             }
         }
 
+        public class TheGetPackageDependentsMethod
+        {
+            [Fact]
+            public void AllQueriesShouldUseQueryHint()
+            {
+                string id = "foo";
+                var context = new Mock<IEntitiesContext>();
+                var entityContext = new FakeEntitiesContext();
+                var disposable = new Mock<IDisposable>();
+
+                var operations = new List<string>();
+
+                disposable
+                    .Setup(x => x.Dispose())
+                    .Callback(() => operations.Add(nameof(IDisposable.Dispose)));
+                context
+                    .Setup(x => x.WithQueryHint(It.IsAny<string>()))
+                    .Returns(() => disposable.Object)
+                    .Callback(() => operations.Add(nameof(EntitiesContext.WithQueryHint)));
+                context
+                    .Setup(f => f.PackageDependencies)
+                    .Returns(entityContext.PackageDependencies)
+                    .Callback(() => operations.Add(nameof(EntitiesContext.PackageDependencies)));
+                context
+                    .Setup(f => f.Packages)
+                    .Returns(entityContext.Packages)
+                    .Callback(() => operations.Add(nameof(EntitiesContext.Packages)));
+                context
+                    .Setup(f => f.PackageRegistrations)
+                    .Returns(entityContext.PackageRegistrations)
+                    .Callback(() => operations.Add(nameof(EntitiesContext.PackageRegistrations)));
+
+                var service = CreateService(context: context);
+
+                service.GetPackageDependents(id);
+
+                Assert.Equal(nameof(EntitiesContext.WithQueryHint), operations.First());
+                Assert.All(
+                    operations.Skip(1).Take(operations.Count - 2),
+                    o => Assert.Contains(
+                        o,
+                        new[]
+                        {
+                            nameof(EntitiesContext.PackageDependencies),
+                            nameof(EntitiesContext.Packages),
+                            nameof(EntitiesContext.PackageRegistrations),
+                        }));
+                Assert.Equal(nameof(IDisposable.Dispose), operations.Last());
+
+                disposable.Verify(x => x.Dispose(), Times.Once);
+                context.Verify(x => x.WithQueryHint(It.IsAny<string>()), Times.Once);
+                context.Verify(x => x.WithQueryHint("OPTIMIZE FOR UNKNOWN"), Times.Once);
+            }
+
+            [Fact]
+            public void UsesRecompileIfConfigured()
+            {
+                string id = "Newtonsoft.Json";
+
+                var context = new Mock<IEntitiesContext>();
+                var contentObjectService = new Mock<IContentObjectService>();
+                var queryHintConfiguration = new Mock<IQueryHintConfiguration>();
+                contentObjectService.Setup(x => x.QueryHintConfiguration).Returns(() => queryHintConfiguration.Object);
+                queryHintConfiguration.Setup(x => x.ShouldUseRecompileForPackageDependents(id)).Returns(true);
+
+                var entityContext = new FakeEntitiesContext();
+
+                context.Setup(f => f.PackageDependencies).Returns(entityContext.PackageDependencies);
+                context.Setup(f => f.Packages).Returns(entityContext.Packages);
+                context.Setup(f => f.PackageRegistrations).Returns(entityContext.PackageRegistrations);
+
+                var service = CreateService(context: context, contentObjectService: contentObjectService);
+
+                service.GetPackageDependents(id);
+
+                queryHintConfiguration.Verify(x => x.ShouldUseRecompileForPackageDependents(It.IsAny<string>()), Times.Once);
+                queryHintConfiguration.Verify(x => x.ShouldUseRecompileForPackageDependents(id), Times.Once);
+                context.Verify(x => x.WithQueryHint(It.IsAny<string>()), Times.Once);
+                context.Verify(x => x.WithQueryHint("RECOMPILE"), Times.Once);
+            }
+
+            [Fact]
+            public void ThereAreExactlyFivePackagesAndAllPackagesAreVerified()
+            {
+                string id = "foo";
+                int packageLimit = 5;
+
+                var context = new Mock<IEntitiesContext>();
+                var entityContext = new FakeEntitiesContext();
+
+                var service = CreateService(context: context);
+
+                var packageDependenciesList = SetupPackageDependency(id);
+                var packageList = SetupPackages();
+                var packageRegistrationsList = SetupPackageRegistration();
+
+                for (int i = 0; i < packageLimit; i++)
+                {
+                    var packageDependency = packageDependenciesList[i];
+                    entityContext.PackageDependencies.Add(packageDependency);
+                }
+
+                for (int i = 0; i < packageLimit; i++)
+                {
+                    var package = packageList[i];
+                    entityContext.Packages.Add(package);
+                }
+
+                for (int i = 0; i < packageLimit; i++)
+                {
+                    var packageRegistration = packageRegistrationsList[i];
+                    entityContext.PackageRegistrations.Add(packageRegistration);
+                }
+
+                context
+                    .Setup(f => f.PackageDependencies)
+                    .Returns(entityContext.PackageDependencies);
+                context
+                    .Setup(f => f.Packages)
+                    .Returns(entityContext.Packages);
+                context
+                    .Setup(f => f.PackageRegistrations)
+                    .Returns(entityContext.PackageRegistrations);
+
+                var result = service.GetPackageDependents(id);
+
+                Assert.Equal(packageLimit, result.TotalPackageCount);
+                Assert.Equal(packageLimit, result.TopPackages.Count);
+
+                PackageTestsWhereAllPackagesAreVerified(result, packageLimit);
+            }
+
+            [Fact]
+            public void ThereAreMoreThanFivePackagesAndAllPackagesAreVerified()
+            {
+                string id = "foo";
+
+                var context = new Mock<IEntitiesContext>();
+                var entityContext = new FakeEntitiesContext();
+
+                var service = CreateService(context: context);
+
+                var packageDependenciesList = SetupPackageDependency(id);
+                var packageList = SetupPackages();
+                var packageRegistrationsList = SetupPackageRegistration();
+
+                foreach (var packageDependency in packageDependenciesList)
+                {
+                    entityContext.PackageDependencies.Add(packageDependency);
+                }
+
+                foreach (var package in packageList)
+                {
+                    entityContext.Packages.Add(package);
+                }
+
+                foreach (var packageRegistration in packageRegistrationsList)
+                {
+                    entityContext.PackageRegistrations.Add(packageRegistration);
+                }
+
+                context
+                    .Setup(f => f.PackageDependencies)
+                    .Returns(entityContext.PackageDependencies);
+                context
+                    .Setup(f => f.Packages)
+                    .Returns(entityContext.Packages);
+                context
+                    .Setup(f => f.PackageRegistrations)
+                    .Returns(entityContext.PackageRegistrations);
+
+                var result = service.GetPackageDependents(id);
+
+                Assert.Equal(6, result.TotalPackageCount);
+                Assert.Equal(5, result.TopPackages.Count);
+
+                PackageTestsWhereAllPackagesAreVerified(result, result.TopPackages.Count);
+            }
+
+            [Fact]
+            public void ThereAreLessThanFivePackagesAndAllPackagesAreVerified()
+            {
+                string id = "foo";
+                int packageLimit = 3;
+
+                var context = new Mock<IEntitiesContext>();
+                var entityContext = new FakeEntitiesContext();
+
+                var service = CreateService(context: context);
+
+                var packageDependenciesList = SetupPackageDependency(id);
+                var packageList = SetupPackages();
+                var packageRegistrationsList = SetupPackageRegistration();
+
+                for (int i = 0; i < packageLimit; i++)
+                {
+                    var packageDependency = packageDependenciesList[i];
+                    entityContext.PackageDependencies.Add(packageDependency);
+                }
+
+                for (int i = 0; i < packageLimit; i++)
+                {
+                    var package = packageList[i];
+                    entityContext.Packages.Add(package);
+                }
+
+                for (int i = 0; i < packageLimit; i++)
+                {
+                    var packageRegistration = packageRegistrationsList[i];
+                    entityContext.PackageRegistrations.Add(packageRegistration);
+                }
+
+                context
+                    .Setup(f => f.PackageDependencies)
+                    .Returns(entityContext.PackageDependencies);
+                context
+                    .Setup(f => f.Packages)
+                    .Returns(entityContext.Packages);
+                context
+                    .Setup(f => f.PackageRegistrations)
+                    .Returns(entityContext.PackageRegistrations);
+
+                var result = service.GetPackageDependents(id);
+
+                Assert.Equal(packageLimit, result.TotalPackageCount);
+                Assert.Equal(packageLimit, result.TopPackages.Count);
+
+                PackageTestsWhereAllPackagesAreVerified(result, packageLimit);
+            }
+
+            [Fact]
+            public void ThereAreNoPackageDependents()
+            {
+                string id = "foo";
+
+                var context = new Mock<IEntitiesContext>();
+                var entityContext = new FakeEntitiesContext();
+
+                var service = CreateService(context: context);
+
+                context
+                    .Setup(f => f.PackageDependencies)
+                    .Returns(entityContext.PackageDependencies);
+                context
+                    .Setup(f => f.Packages)
+                    .Returns(entityContext.Packages);
+                context
+                    .Setup(f => f.PackageRegistrations)
+                    .Returns(entityContext.PackageRegistrations);
+
+                var result = service.GetPackageDependents(id);
+                Assert.Equal(0, result.TotalPackageCount);
+                Assert.Equal(0, result.TopPackages.Count);
+            }
+
+            [Fact]
+            public void PackageIsNotLatestSemVer2()
+            {
+                string id = "foo";
+
+                var context = new Mock<IEntitiesContext>();
+                var entityContext = new FakeEntitiesContext();
+
+                var service = CreateService(context: context);
+
+                var packageDependenciesList = SetupPackageDependency(id);
+                var packageList = SetupPackages();
+                var packageRegistrationsList = SetupPackageRegistration();
+
+                foreach (var packageDependency in packageDependenciesList)
+                {
+                    entityContext.PackageDependencies.Add(packageDependency);
+                }
+
+                foreach (var package in packageList)
+                {
+                    package.IsLatestSemVer2 = false;
+                    entityContext.Packages.Add(package);
+                }
+
+                foreach (var packageRegistration in packageRegistrationsList)
+                {
+                    entityContext.PackageRegistrations.Add(packageRegistration);
+                }
+
+                context
+                    .Setup(f => f.PackageDependencies)
+                    .Returns(entityContext.PackageDependencies);
+                context
+                    .Setup(f => f.Packages)
+                    .Returns(entityContext.Packages);
+                context
+                    .Setup(f => f.PackageRegistrations)
+                    .Returns(entityContext.PackageRegistrations);
+
+                var result = service.GetPackageDependents(id);
+
+                Assert.Equal(0, result.TotalPackageCount);
+                Assert.Equal(0, result.TopPackages.Count);
+            }
+
+            [Fact]
+            public void NoVerifiedPackages()
+            {
+                string id = "foo";
+
+                var context = new Mock<IEntitiesContext>();
+                var entityContext = new FakeEntitiesContext();
+
+                var service = CreateService(context: context);
+
+                var packageDependenciesList = SetupPackageDependency(id);
+                var packageList = SetupPackages();
+                var packageRegistrationsList = SetupPackageRegistration();
+
+                foreach (var packageDependency in packageDependenciesList)
+                {
+                    entityContext.PackageDependencies.Add(packageDependency);
+                }
+
+                foreach (var package in packageList)
+                {
+                    entityContext.Packages.Add(package);
+                }
+
+                foreach (var packageRegistration in packageRegistrationsList)
+                {
+                    packageRegistration.IsVerified = false;
+                    entityContext.PackageRegistrations.Add(packageRegistration);
+                }
+
+                context
+                    .Setup(f => f.PackageDependencies)
+                    .Returns(entityContext.PackageDependencies);
+                context
+                    .Setup(f => f.Packages)
+                    .Returns(entityContext.Packages);
+                context
+                    .Setup(f => f.PackageRegistrations)
+                    .Returns(entityContext.PackageRegistrations);
+
+                var result = service.GetPackageDependents(id);
+
+                Assert.Equal(6, result.TotalPackageCount);
+                Assert.Equal(5, result.TopPackages.Count);
+
+                for (int i = 0; i < result.TopPackages.Count; i++)
+                {
+                    var currentPackage = result.TopPackages.ElementAt(i);
+                    var prevPackage = i > 0 ? result.TopPackages.ElementAt(i - 1) : null;
+                    if (prevPackage != null)
+                    {
+                        Assert.True(currentPackage.DownloadCount <= prevPackage.DownloadCount);
+                    }
+                    Assert.False(currentPackage.IsVerified);
+                }
+            }
+
+            [Fact]
+            public void MixtureOfVerifiedAndNonVerifiedPackages()
+            {
+                string id = "foo";
+                int packageLimit = 5;
+
+                var context = new Mock<IEntitiesContext>();
+                var entityContext = new FakeEntitiesContext();
+
+                var service = CreateService(context: context);
+
+                var packageDependenciesList = SetupPackageDependency(id);
+                var packageList = SetupPackages();
+                var packageRegistrationsList = SetupPackageRegistration();
+
+                for (int i = 0; i < packageLimit; i++)
+                {
+                    var packageDependency = packageDependenciesList[i];
+                    entityContext.PackageDependencies.Add(packageDependency);
+                }
+
+                for (int i = 0; i < packageLimit; i++)
+                {
+                    var package = packageList[i];
+                    entityContext.Packages.Add(package);
+                }
+
+                for (int i = 0; i < packageLimit; i++)
+                {
+                    var packageRegistration = packageRegistrationsList[i];
+
+                    if (i % 2 == 0)
+                    {
+                        packageRegistration.IsVerified = false;
+                    }
+
+                    entityContext.PackageRegistrations.Add(packageRegistration);
+                }
+
+                context
+                    .Setup(f => f.PackageDependencies)
+                    .Returns(entityContext.PackageDependencies);
+                context
+                    .Setup(f => f.Packages)
+                    .Returns(entityContext.Packages);
+                context
+                    .Setup(f => f.PackageRegistrations)
+                    .Returns(entityContext.PackageRegistrations);
+
+                var result = service.GetPackageDependents(id);
+
+                Assert.Equal(packageLimit, result.TotalPackageCount);
+                Assert.Equal(packageLimit, result.TopPackages.Count);
+
+                for (int i = 0; i < packageLimit; i++)
+                {
+                    var currentPackage = result.TopPackages.ElementAt(i);
+                    var prevPackage = i > 0 ? result.TopPackages.ElementAt(i - 1) : null;
+                    if (prevPackage != null)
+                    {
+                        Assert.True(currentPackage.DownloadCount <= prevPackage.DownloadCount);
+                    }
+
+                    if (i % 2 == 0)
+                    {
+                        Assert.False(currentPackage.IsVerified);
+                    }
+
+                    else 
+                    {
+                        Assert.True(currentPackage.IsVerified);
+                    }    
+                }
+            }
+
+            private void PackageTestsWhereAllPackagesAreVerified(PackageDependents result, int packages)
+            {
+                for (int i = 0; i < packages; i++)
+                {
+                    var currentPackage = result.TopPackages.ElementAt(i);
+                    var prevPackage = i > 0 ? result.TopPackages.ElementAt(i - 1) : null;
+                    if (prevPackage != null)
+                    {
+                        Assert.True(currentPackage.DownloadCount <= prevPackage.DownloadCount);
+                    }
+                    Assert.True(currentPackage.IsVerified);
+                }
+            }
+
+            private List<PackageDependency> SetupPackageDependency(string id)
+            {
+                var packageDependencyList = new List<PackageDependency>();
+
+                var foo1 = new PackageDependency()
+                {
+                    PackageKey = 1,
+                    Id = id
+                };
+
+                var foo2 = new PackageDependency()
+                {
+                    PackageKey = 2,
+                    Id = id
+                };
+
+                var foo3 = new PackageDependency()
+                {
+                    PackageKey = 3,
+                    Id = id
+                };
+
+                var foo4 = new PackageDependency()
+                {
+                    PackageKey = 4,
+                    Id = id
+                };
+
+                var foo5 = new PackageDependency()
+                {
+                    PackageKey = 5,
+                    Id = id
+                };
+
+                var foo6 = new PackageDependency()
+                {
+                    PackageKey = 6,
+                    Id = id
+                };
+
+                packageDependencyList.Add(foo1);
+                packageDependencyList.Add(foo2);
+                packageDependencyList.Add(foo3);
+                packageDependencyList.Add(foo4);
+                packageDependencyList.Add(foo5);
+                packageDependencyList.Add(foo6);
+
+                return packageDependencyList;
+            }
+
+            private List<Package> SetupPackages()
+            {
+                var packagesList = new List<Package>();
+
+                var pFoo1 = new Package()
+                {
+                    Key = 1,
+                    PackageRegistrationKey = 11,
+                    IsLatestSemVer2 = true,
+                    Description = "This 111"
+                };
+
+                var pFoo2 = new Package()
+                {
+                    Key = 2,
+                    PackageRegistrationKey = 22,
+                    IsLatestSemVer2 = true,
+                    Description = "This 222"
+                };
+
+                var pFoo3 = new Package()
+                {
+                    Key = 3,
+                    PackageRegistrationKey = 33,
+                    IsLatestSemVer2 = true,
+                    Description = "This 333"
+                };
+
+                var pFoo4 = new Package()
+                {
+                    Key = 4,
+                    PackageRegistrationKey = 44,
+                    IsLatestSemVer2 = true,
+                    Description = "This 444"
+                };
+
+                var pFoo5 = new Package()
+                {
+                    Key = 5,
+                    PackageRegistrationKey = 55,
+                    IsLatestSemVer2 = true,
+                    Description = "This 555"
+                };
+
+                var pFoo6 = new Package()
+                {
+                    Key = 6,
+                    PackageRegistrationKey = 66,
+                    IsLatestSemVer2 = true,
+                    Description = "I put the 7 on purpose 667"
+                };
+
+                packagesList.Add(pFoo1);
+                packagesList.Add(pFoo2);
+                packagesList.Add(pFoo3);
+                packagesList.Add(pFoo4);
+                packagesList.Add(pFoo5);
+                packagesList.Add(pFoo6);
+
+                return packagesList;
+            }
+
+            private List<PackageRegistration> SetupPackageRegistration()
+            {
+                var packageRegistrationList= new List<PackageRegistration>();
+
+                var prFoo1 = new PackageRegistration()
+                {
+                    Key = 11,
+                    DownloadCount = 100,
+                    Id = "p1",
+                    IsVerified = true
+                };
+
+                var prFoo2 = new PackageRegistration()
+                {
+                    Key = 22,
+                    DownloadCount = 200,
+                    Id = "p2",
+                    IsVerified = true
+                };
+
+                var prFoo3 = new PackageRegistration()
+                {
+                    Key = 33,
+                    DownloadCount = 300,
+                    Id = "p3",
+                    IsVerified = true
+                };
+
+                var prFoo4 = new PackageRegistration()
+                {
+                    Key = 44,
+                    DownloadCount = 400,
+                    Id = "p4",
+                    IsVerified = true
+                };
+
+                var prFoo5 = new PackageRegistration()
+                {
+                    Key = 55,
+                    DownloadCount = 500,
+                    Id = "p5",
+                    IsVerified = true
+                };
+                var prFoo6 = new PackageRegistration()
+                {
+                    Key = 66,
+                    DownloadCount = 600,
+                    Id = "p6",
+                    IsVerified = true
+                };
+
+                packageRegistrationList.Add(prFoo1);
+                packageRegistrationList.Add(prFoo2);
+                packageRegistrationList.Add(prFoo3);
+                packageRegistrationList.Add(prFoo4);
+                packageRegistrationList.Add(prFoo5);
+                packageRegistrationList.Add(prFoo6);
+
+                return packageRegistrationList;
+            }
+
+            [Theory]
+            [InlineData(null)]
+            [InlineData("")]
+            [InlineData("       ")]
+            public void WillThrowIfIdIsNullOrEmpty(string id)
+            {
+                var service = CreateService();
+                var ex = Assert.Throws<ArgumentNullException>(() => service.GetPackageDependents(id));
+                Assert.Equal("id", ex.ParamName);
+            }
+        }
+
         public class TheSetLicenseReportVisibilityMethod
         {
             [Fact]
@@ -2396,6 +3177,51 @@ namespace NuGetGallery
                 service.EnrichPackageFromNuGetPackage(package, packageArchiveReader, packageMetadata, new PackageStreamMetadata(), new User());
 
                 Assert.Equal(expectedFlag, package.HasEmbeddedIcon);
+            }
+
+            [Theory]
+            [InlineData("readme.md", true)]
+            [InlineData(null, false)]
+            public void SetsHasReadmeFlagProperly(string readmeFilename, bool expectedFlag)
+            {
+                var service = CreateService();
+                var package = new Package
+                {
+                    PackageRegistration = new PackageRegistration
+                    {
+                        Id = "SomePackage"
+                    },
+                    HasReadMe = false,
+                };
+
+                // the EnrichPackageFromNuGetPackage method does not read readme filename from the PackageArchiveReader
+                // so we won't bother setting it up here.
+                var packageStream = PackageServiceUtility.CreateNuGetPackageStream(package.Id);
+
+                var packageArchiveReader = new PackageArchiveReader(packageStream);
+
+                var metadataDictionary = new Dictionary<string, string>
+                {
+                    { "version", "1.2.3" },
+                };
+
+                if (readmeFilename != null)
+                {
+                    metadataDictionary.Add("readme", readmeFilename);
+                }
+
+                var packageMetadata = new PackageMetadata(
+                    metadataDictionary,
+                    Enumerable.Empty<PackageDependencyGroup>(),
+                    Enumerable.Empty<FrameworkSpecificGroup>(),
+                    Enumerable.Empty<NuGet.Packaging.Core.PackageType>(),
+                    new NuGetVersion(3, 2, 1),
+                    repositoryMetadata: null,
+                    licenseMetadata: null);
+
+                service.EnrichPackageFromNuGetPackage(package, packageArchiveReader, packageMetadata, new PackageStreamMetadata(), new User());
+
+                Assert.Equal(expectedFlag, package.HasReadMe);
             }
         }
     }

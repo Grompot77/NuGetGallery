@@ -71,7 +71,7 @@
 
             this.PackageOwners = packageOwners;
             this.packageViewModels = [];
-            
+
             // Generic API key properties.
             this._SetPackageSelection = function (packages) {
                 $.each(self.packageViewModels, function (i, m) {
@@ -87,6 +87,7 @@
                 this.Description(data.Description || null);
                 this.Expires(data.Expires || null);
                 this.HasExpired(data.HasExpired || false);
+                this.RevocationSource(data.RevocationSource || null);
                 this.IsNonScopedApiKey(data.IsNonScopedApiKey || false);
                 this.Owner(data.Owner || null);
                 this.Scopes(data.Scopes || []);
@@ -106,22 +107,25 @@
                     }
 
                     this.PackageOwner(existingOwner);
-                } else {
+
+                } else if (this.PackageOwners.length == 1) {
                     this.PackageOwner(this.PackageOwners[0]);
-                }
+                } 
             };
+
             this.Key = ko.observable(0);
             this.Type = ko.observable();
             this.Value = ko.observable();
             this.Description = ko.observable();
             this.Expires = ko.observable();
             this.HasExpired = ko.observable();
+            this.RevocationSource = ko.observable();
             this.IsNonScopedApiKey = ko.observable();
             this.Owner = ko.observable();
             this.Scopes = ko.observableArray();
             this.Packages = ko.observableArray();
             this.GlobPattern = ko.observable();
-
+ 
             // Properties used for the form
             this.PendingDescription = ko.observable();
 
@@ -131,6 +135,10 @@
                 return self.PackageOwner() && self.PackageOwner().Owner;
             }, this);
             this.PackageOwner.subscribe(function (newOwner) {
+                if (newOwner == null) {
+                    return;
+                }
+
                 // When the package owner scope is changed, update the selected action scopes to those that are allowed on behalf of the new package owner.
                 var isPushNewSelected = function () {
                     return self.PushScope() === initialData.PackagePushScope;
@@ -326,6 +334,10 @@
             this.PackageOwner.subscribe(function (newValue) {
                 // Initialize each package ID as a view model. This view model is used to track manual checkbox checks
                 // and whether the glob pattern matches the ID.
+                if (newValue == null) {
+                    return;
+                }
+
                 var packageIdToViewModel = {};
                 self.packageViewModels = [];
                 $.each(newValue.PackageIds, function (i, packageId) {
@@ -428,6 +440,10 @@
 
                 // Re-attach extensions.
                 self.AttachExtensions();
+
+                // Focus the edit link so that the next tab key will continue with where it was left off prior to
+                // opening the edit form. See https://github.com/NuGet/NuGetGallery/issues/8183.
+                $("#" + self.StartEditId()).focus();
             };
 
             this.ShowRemainingPackages = function (_, e) {
@@ -628,7 +644,21 @@
                 var descriptions = [];
                 for (var i in apiKeys) {
                     if (apiKeys[i].HasExpired()) {
-                        descriptions.push(apiKeys[i].Description());
+                        if (!apiKeys[i].RevocationSource()) {
+                            descriptions.push(apiKeys[i].Description());
+                        }
+                    }
+                }
+                return descriptions;
+            }, this);
+            this.RevocationDescriptions = ko.pureComputed(function () {
+                var apiKeys = this.ApiKeys();
+                var descriptions = [];
+                for (var i in apiKeys) {
+                    if (apiKeys[i].HasExpired()) {
+                        if (apiKeys[i].RevocationSource()) {
+                            descriptions.push(apiKeys[i].Description());
+                        }
                     }
                 }
                 return descriptions;

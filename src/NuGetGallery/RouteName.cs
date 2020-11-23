@@ -31,6 +31,8 @@ namespace NuGetGallery
         public const string ApiKeys = "ApiKeys";
         public const string Profile = "Profile";
         public const string DisplayPackage = "package-route";
+        public const string DisplayReleasePackage = "package-release-route";
+        public const string DisplayPrereleasePackage = "package-prerelease-route";
         public const string DisplayPackageFeed = "package-route-feed";
         public const string DownloadPackage = "DownloadPackage";
         public const string DownloadSymbolsPackage = "DownloadSymbolsPackage";
@@ -109,12 +111,12 @@ namespace NuGetGallery
         public const string GetOrganizationCertificates = "GetOrganizationCertificates";
         public const string SetRequiredSigner = "SetRequiredSigner";
         public const string License = "License";
-        public const string ApiV2CuratedSimulateError = "api-v2curated-simulate-error";
         public const string PagesSimulateError = "PagesSimulateError";
         public const string ApiSimulateError = "ApiSimulateError";
         public const string ExperimentsSearchSideBySide = "ExperimentsSearchSideBySide";
         public const string PackageReflowAction = "PackageReflowAction";
         public const string PackageRevalidateAction = "PackageRevalidateAction";
         public const string PackageRevalidateSymbolsAction = "PackageRevalidateSymbolsAction";
+        public const string Send2FAFeedback = "Send2FAFeedback";
     }
 }

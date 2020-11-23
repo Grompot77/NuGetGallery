@@ -1,6 +1,7 @@
 ﻿// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
+#pragma warning disable CA3147 // No need to validate Antiforgery Token with API request
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -512,6 +513,15 @@ namespace NuGetGallery
                     HttpStatusCode.RequestEntityTooLarge,
                     Strings.PackageFileTooLarge);
             }
+            catch (HttpException ex) when (!Response.IsClientConnected)
+            {
+                // ASP.NET throws HttpException when the client has disconnected during the upload.
+                TelemetryService.TrackSymbolPackagePushDisconnectEvent();
+                QuietLog.LogHandledException(ex);
+                return new HttpStatusCodeWithBodyResult(
+                    HttpStatusCode.BadRequest,
+                    Strings.PackageUploadCancelled);
+            }
             catch (Exception ex)
             {
                 ex.Log();
@@ -549,7 +559,21 @@ namespace NuGetGallery
                                 Strings.PackageEntryFromTheFuture,
                                 entryInTheFuture.Name));
                         }
+                    }
+                    catch (Exception ex)
+                    {
+                        // This is not very elegant to catch every Exception type here. However, the types of exceptions
+                        // that could be thrown when reading a garbage ZIP is undocumented. We've seen ArgumentOutOfRangeException
+                        // get thrown from HttpInputStream and InvalidDataException thrown from ZipArchive.
+                        ex.Log();
 
+                        return new HttpStatusCodeWithBodyResult(HttpStatusCode.BadRequest, string.Format(
+                            CultureInfo.CurrentCulture,
+                            Strings.FailedToReadUploadFile));
+                    }
+
+                    try
+                    {
                         using (var packageToPush = new PackageArchiveReader(packageStream, leaveStreamOpen: false))
                         {
                             try
@@ -764,10 +788,6 @@ namespace NuGetGallery
                             var warnings = new List<IValidationMessage>();
                             warnings.AddRange(beforeValidationResult.Warnings);
                             warnings.AddRange(afterValidationResult.Warnings);
-                            if (package.SemVerLevelKey == SemVerLevelKey.SemVer2)
-                            {
-                                warnings.Add(new PlainTextOnlyValidationMessage(Strings.WarningSemVer2PackagePushed));
-                            }
 
                             return new HttpStatusCodeWithServerWarningResult(HttpStatusCode.Created, warnings);
                         }
@@ -800,6 +820,15 @@ namespace NuGetGallery
                 return new HttpStatusCodeWithBodyResult(
                     HttpStatusCode.RequestEntityTooLarge,
                     Strings.PackageFileTooLarge);
+            }
+            catch (HttpException ex) when (!Response.IsClientConnected)
+            {
+                // ASP.NET throws HttpException when the client has disconnected during the upload.
+                TelemetryService.TrackPackagePushDisconnectEvent();
+                QuietLog.LogHandledException(ex);
+                return new HttpStatusCodeWithBodyResult(
+                    HttpStatusCode.BadRequest,
+                    Strings.PackageUploadCancelled);
             }
             catch (Exception)
             {
@@ -990,11 +1019,16 @@ namespace NuGetGallery
         public virtual async Task<ActionResult> GetPackageIds(
             string partialId,
             bool? includePrerelease,
+            bool? testData,
             string semVerLevel = null)
         {
             return new JsonResult
             {
-                Data = await _autocompletePackageIdsQuery.Execute(partialId, includePrerelease, semVerLevel),
+                Data = await _autocompletePackageIdsQuery.Execute(
+                    partialId,
+                    includePrerelease,
+                    testData,
+                    semVerLevel),
                 JsonRequestBehavior = JsonRequestBehavior.AllowGet
             };
         }
@@ -1004,11 +1038,16 @@ namespace NuGetGallery
         public virtual async Task<ActionResult> GetPackageVersions(
             string id,
             bool? includePrerelease,
+            bool? testData,
             string semVerLevel = null)
         {
             return new JsonResult
             {
-                Data = await _autocompletePackageVersionsQuery.Execute(id, includePrerelease, semVerLevel),
+                Data = await _autocompletePackageVersionsQuery.Execute(
+                    id,
+                    includePrerelease,
+                    testData,
+                    semVerLevel),
                 JsonRequestBehavior = JsonRequestBehavior.AllowGet
             };
         }
@@ -1153,3 +1192,4 @@ namespace NuGetGallery
         }
     }
 }
+#pragma warning restore CA3147 // No need to validate Antiforgery Token with API request

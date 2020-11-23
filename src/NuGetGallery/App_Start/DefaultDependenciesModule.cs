@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Data.Entity;
+using System.Data.Entity.Infrastructure.Interception;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -21,10 +22,12 @@ using Autofac.Core;
 using Autofac.Extensions.DependencyInjection;
 using Elmah;
 using Microsoft.ApplicationInsights.Extensibility;
+using Microsoft.ApplicationInsights.Extensibility.Implementation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.WindowsAzure.ServiceRuntime;
+using NuGet.Services.Configuration;
 using NuGet.Services.Entities;
 using NuGet.Services.FeatureFlags;
 using NuGet.Services.KeyVault;
@@ -44,6 +47,7 @@ using NuGetGallery.Configuration;
 using NuGetGallery.Cookies;
 using NuGetGallery.Diagnostics;
 using NuGetGallery.Features;
+using NuGetGallery.Helpers;
 using NuGetGallery.Infrastructure;
 using NuGetGallery.Infrastructure.Authentication;
 using NuGetGallery.Infrastructure.Lucene;
@@ -51,8 +55,8 @@ using NuGetGallery.Infrastructure.Mail;
 using NuGetGallery.Infrastructure.Search;
 using NuGetGallery.Infrastructure.Search.Correlation;
 using NuGetGallery.Security;
+using NuGetGallery.Services;
 using Role = NuGet.Services.Entities.Role;
-using SecretReaderFactory = NuGetGallery.Configuration.SecretReader.SecretReaderFactory;
 
 namespace NuGetGallery
 {
@@ -82,29 +86,28 @@ namespace NuGetGallery
         {
             var services = new ServiceCollection();
 
-            var configuration = new ConfigurationService();
-            var secretReaderFactory = new SecretReaderFactory(configuration);
-            var secretReader = secretReaderFactory.CreateSecretReader();
-            var secretInjector = secretReaderFactory.CreateSecretInjector(secretReader);
+            var configuration = ConfigurationService.Initialize();
+            var secretInjector = configuration.SecretInjector;
 
             builder.RegisterInstance(secretInjector)
                 .AsSelf()
                 .As<ISecretInjector>()
                 .SingleInstance();
 
-            configuration.SecretInjector = secretInjector;
-
-            // Register the ILoggerFactory and configure it to use AppInsights if an instrumentation key is provided.
-            var instrumentationKey = configuration.Current.AppInsightsInstrumentationKey;
-            if (!string.IsNullOrEmpty(instrumentationKey))
-            {
-                TelemetryConfiguration.Active.InstrumentationKey = instrumentationKey;
-            }
+            // Register the ILoggerFactory and configure AppInsights.
+            var applicationInsightsConfiguration = ConfigureApplicationInsights(
+                configuration.Current,
+                out ITelemetryClient telemetryClient);
 
             var loggerConfiguration = LoggingSetup.CreateDefaultLoggerConfiguration(withConsoleLogger: false);
-            var loggerFactory = LoggingSetup.CreateLoggerFactory(loggerConfiguration);
+            var loggerFactory = LoggingSetup.CreateLoggerFactory(
+                loggerConfiguration,
+                telemetryConfiguration: applicationInsightsConfiguration.TelemetryConfiguration);
 
-            var telemetryClient = TelemetryClientWrapper.Instance;
+            builder.RegisterInstance(applicationInsightsConfiguration.TelemetryConfiguration)
+                .AsSelf()
+                .SingleInstance();
+
             builder.RegisterInstance(telemetryClient)
                 .AsSelf()
                 .As<ITelemetryClient>()
@@ -123,6 +126,7 @@ namespace NuGetGallery
 
             builder.RegisterInstance(configuration)
                 .AsSelf()
+                .As<IConfigurationFactory>()
                 .As<IGalleryConfigurationService>();
 
             builder.Register(c => configuration.Current)
@@ -137,7 +141,10 @@ namespace NuGetGallery
             builder.Register(c => configuration.PackageDelete)
                 .As<IPackageDeleteConfiguration>();
 
-            var telemetryService = new TelemetryService(diagnosticsService, telemetryClient);
+            var telemetryService = new TelemetryService(
+                new TraceDiagnosticsSource(nameof(TelemetryService), telemetryClient),
+                telemetryClient);
+
             builder.RegisterInstance(telemetryService)
                 .AsSelf()
                 .As<ITelemetryService>()
@@ -160,8 +167,10 @@ namespace NuGetGallery
                 .As<ICacheService>()
                 .InstancePerLifetimeScope();
 
+            DbInterception.Add(new QueryHintInterceptor());
+
             var galleryDbConnectionFactory = CreateDbConnectionFactory(
-                diagnosticsService,
+                loggerFactory,
                 nameof(EntitiesContext),
                 configuration.Current.SqlConnectionString,
                 secretInjector);
@@ -252,10 +261,15 @@ namespace NuGetGallery
                 .As<IEntityRepository<PackageDeprecation>>()
                 .InstancePerLifetimeScope();
 
-            ConfigureGalleryReadOnlyReplicaEntitiesContext(builder, diagnosticsService, configuration, secretInjector);
+            builder.RegisterType<EntityRepository<PackageRename>>()
+                .AsSelf()
+                .As<IEntityRepository<PackageRename>>()
+                .InstancePerLifetimeScope();
+
+            ConfigureGalleryReadOnlyReplicaEntitiesContext(builder, loggerFactory, configuration, secretInjector);
 
             var supportDbConnectionFactory = CreateDbConnectionFactory(
-                diagnosticsService,
+                loggerFactory,
                 nameof(SupportRequestDbContext),
                 configuration.Current.SqlConnectionStringSupportRequest,
                 secretInjector);
@@ -278,6 +292,11 @@ namespace NuGetGallery
             builder.RegisterType<PackageService>()
                 .AsSelf()
                 .As<IPackageService>()
+                .InstancePerLifetimeScope();
+
+            builder.RegisterType<PackageFilter>()
+                .AsSelf()
+                .As<IPackageFilter>()
                 .InstancePerLifetimeScope();
 
             builder.RegisterType<PackageDeleteService>()
@@ -320,6 +339,10 @@ namespace NuGetGallery
                 .As<ISymbolPackageService>()
                 .InstancePerLifetimeScope();
 
+            builder.RegisterType<PackageMetadataValidationService>()
+                .As<IPackageMetadataValidationService>()
+                .InstancePerLifetimeScope();
+
             builder.RegisterType<PackageUploadService>()
                 .AsSelf()
                 .As<IPackageUploadService>()
@@ -343,6 +366,10 @@ namespace NuGetGallery
             builder.RegisterType<ReadMeService>()
                 .AsSelf()
                 .As<IReadMeService>()
+                .InstancePerLifetimeScope();
+
+            builder.RegisterType<MarkdownService>()
+                .As<IMarkdownService>()
                 .InstancePerLifetimeScope();
 
             builder.RegisterType<ApiScopeEvaluator>()
@@ -395,6 +422,10 @@ namespace NuGetGallery
                 .As<IPackageDeprecationService>()
                 .InstancePerLifetimeScope();
 
+            builder.RegisterType<PackageRenameService>()
+                .As<IPackageRenameService>()
+                .InstancePerLifetimeScope();
+
             builder.RegisterType<PackageUpdateService>()
                 .As<IPackageUpdateService>()
                 .InstancePerLifetimeScope();
@@ -409,6 +440,10 @@ namespace NuGetGallery
 
             builder.RegisterType<IconUrlTemplateProcessor>()
                 .As<IIconUrlTemplateProcessor>()
+                .InstancePerLifetimeScope();
+
+            builder.RegisterType<PackageVulnerabilityService>()
+                .As<IPackageVulnerabilityService>()
                 .InstancePerLifetimeScope();
 
             services.AddHttpClient();
@@ -437,11 +472,15 @@ namespace NuGetGallery
                     break;
             }
 
-            RegisterAsynchronousValidation(builder, diagnosticsService, configuration, secretInjector);
+            RegisterAsynchronousValidation(builder, loggerFactory, configuration, secretInjector);
 
             RegisterAuditingServices(builder, defaultAuditingService);
 
-            RegisterCookieComplianceService(builder, configuration, diagnosticsService);
+            RegisterCookieComplianceService(configuration, loggerFactory);
+
+            builder.RegisterType<CookieExpirationService>()
+                .As<ICookieExpirationService>()
+                .SingleInstance();
 
             RegisterABTestServices(builder);
 
@@ -464,6 +503,169 @@ namespace NuGetGallery
 
             ConfigureAutocomplete(builder, configuration);
             builder.Populate(services);
+        }
+
+        // Internal for testing purposes
+        internal static ApplicationInsightsConfiguration ConfigureApplicationInsights(
+            IAppConfiguration configuration,
+            out ITelemetryClient telemetryClient)
+        {
+            var instrumentationKey = configuration.AppInsightsInstrumentationKey;
+            var heartbeatIntervalSeconds = configuration.AppInsightsHeartbeatIntervalSeconds;
+
+            ApplicationInsightsConfiguration applicationInsightsConfiguration;
+
+            if (heartbeatIntervalSeconds > 0)
+            {
+                applicationInsightsConfiguration = ApplicationInsights.Initialize(
+                    instrumentationKey,
+                    TimeSpan.FromSeconds(heartbeatIntervalSeconds));
+            }
+            else
+            {
+                applicationInsightsConfiguration = ApplicationInsights.Initialize(instrumentationKey);
+            }
+
+            var telemetryConfiguration = applicationInsightsConfiguration.TelemetryConfiguration;
+
+            // Add enrichers
+            try
+            {
+                if (RoleEnvironment.IsAvailable)
+                {
+                    telemetryConfiguration.TelemetryInitializers.Add(
+                        new DeploymentIdTelemetryEnricher(RoleEnvironment.DeploymentId));
+                }
+            }
+            catch
+            {
+                // This likely means the cloud service runtime is not available.
+            }
+
+            if (configuration.DeploymentLabel != null)
+            {
+                telemetryConfiguration.TelemetryInitializers.Add(new DeploymentLabelEnricher(configuration.DeploymentLabel));
+            }
+
+            telemetryConfiguration.TelemetryInitializers.Add(new ClientInformationTelemetryEnricher());
+            telemetryConfiguration.TelemetryInitializers.Add(new KnownOperationNameEnricher());
+            telemetryConfiguration.TelemetryInitializers.Add(new AzureWebAppTelemetryInitializer());
+            telemetryConfiguration.TelemetryInitializers.Add(new CustomerResourceIdEnricher());
+
+            // Add processors
+            telemetryConfiguration.TelemetryProcessorChainBuilder.Use(next =>
+            {
+                var processor = new RequestTelemetryProcessor(next);
+
+                processor.SuccessfulResponseCodes.Add(400);
+                processor.SuccessfulResponseCodes.Add(404);
+                processor.SuccessfulResponseCodes.Add(405);
+
+                return processor;
+            });
+
+            telemetryConfiguration.TelemetryProcessorChainBuilder.Use(next => new ClientTelemetryPIIProcessor(next));
+
+            // Hook-up TelemetryModules manually...
+            RegisterApplicationInsightsTelemetryModules(telemetryConfiguration);
+
+            var telemetryClientWrapper = TelemetryClientWrapper.UseTelemetryConfiguration(applicationInsightsConfiguration.TelemetryConfiguration);
+
+            telemetryConfiguration.TelemetryProcessorChainBuilder.Use(
+                next => new ExceptionTelemetryProcessor(next, telemetryClientWrapper.UnderlyingClient));
+
+            // Note: sampling rate must be a factor 100/N where N is a whole number
+            // e.g.: 50 (= 100/2), 33.33 (= 100/3), 25 (= 100/4), ...
+            // https://azure.microsoft.com/en-us/documentation/articles/app-insights-sampling/
+            var instrumentationSamplingPercentage = configuration.AppInsightsSamplingPercentage;
+            if (instrumentationSamplingPercentage > 0 && instrumentationSamplingPercentage < 100)
+            {
+                telemetryConfiguration.TelemetryProcessorChainBuilder.UseSampling(instrumentationSamplingPercentage);
+            }
+
+            telemetryConfiguration.TelemetryProcessorChainBuilder.Build();
+
+            QuietLog.UseTelemetryClient(telemetryClientWrapper);
+
+            telemetryClient = telemetryClientWrapper;
+
+            return applicationInsightsConfiguration;
+        }
+
+        private static void RegisterApplicationInsightsTelemetryModules(TelemetryConfiguration configuration)
+        {
+            RegisterApplicationInsightsTelemetryModule(
+                new Microsoft.ApplicationInsights.WindowsServer.AppServicesHeartbeatTelemetryModule(),
+                configuration);
+
+            RegisterApplicationInsightsTelemetryModule(
+                new Microsoft.ApplicationInsights.WindowsServer.AzureInstanceMetadataTelemetryModule(),
+                configuration);
+
+            RegisterApplicationInsightsTelemetryModule(
+                new Microsoft.ApplicationInsights.WindowsServer.DeveloperModeWithDebuggerAttachedTelemetryModule(),
+                configuration);
+
+            RegisterApplicationInsightsTelemetryModule(
+                new Microsoft.ApplicationInsights.WindowsServer.UnhandledExceptionTelemetryModule(),
+                configuration);
+
+            RegisterApplicationInsightsTelemetryModule(
+                new Microsoft.ApplicationInsights.WindowsServer.UnobservedExceptionTelemetryModule(),
+                configuration);
+
+            var requestTrackingModule = new Microsoft.ApplicationInsights.Web.RequestTrackingTelemetryModule();
+            requestTrackingModule.Handlers.Add("Microsoft.VisualStudio.Web.PageInspector.Runtime.Tracing.RequestDataHttpHandler");
+            requestTrackingModule.Handlers.Add("System.Web.StaticFileHandler");
+            requestTrackingModule.Handlers.Add("System.Web.Handlers.AssemblyResourceLoader");
+            requestTrackingModule.Handlers.Add("System.Web.Optimization.BundleHandler");
+            requestTrackingModule.Handlers.Add("System.Web.Script.Services.ScriptHandlerFactory");
+            requestTrackingModule.Handlers.Add("System.Web.Handlers.TraceHandler");
+            requestTrackingModule.Handlers.Add("System.Web.Services.Discovery.DiscoveryRequestHandler");
+            requestTrackingModule.Handlers.Add("System.Web.HttpDebugHandler");
+            RegisterApplicationInsightsTelemetryModule(
+                requestTrackingModule,
+                configuration);
+
+            RegisterApplicationInsightsTelemetryModule(
+                new Microsoft.ApplicationInsights.Web.ExceptionTrackingTelemetryModule(),
+                configuration);
+
+            RegisterApplicationInsightsTelemetryModule(
+                new Microsoft.ApplicationInsights.Web.AspNetDiagnosticTelemetryModule(),
+                configuration);
+
+            var dependencyTrackingModule = new Microsoft.ApplicationInsights.DependencyCollector.DependencyTrackingTelemetryModule();
+            dependencyTrackingModule.ExcludeComponentCorrelationHttpHeadersOnDomains.Add("core.windows.net");
+            dependencyTrackingModule.ExcludeComponentCorrelationHttpHeadersOnDomains.Add("core.chinacloudapi.cn");
+            dependencyTrackingModule.ExcludeComponentCorrelationHttpHeadersOnDomains.Add("core.cloudapi.de");
+            dependencyTrackingModule.ExcludeComponentCorrelationHttpHeadersOnDomains.Add("core.usgovcloudapi.net");
+            dependencyTrackingModule.IncludeDiagnosticSourceActivities.Add("Microsoft.Azure.EventHubs");
+            dependencyTrackingModule.IncludeDiagnosticSourceActivities.Add("Microsoft.Azure.ServiceBus");
+            RegisterApplicationInsightsTelemetryModule(
+                dependencyTrackingModule,
+                configuration);
+
+            RegisterApplicationInsightsTelemetryModule(
+                new Microsoft.ApplicationInsights.Extensibility.PerfCounterCollector.PerformanceCollectorModule(),
+                configuration);
+
+            RegisterApplicationInsightsTelemetryModule(
+                new Microsoft.ApplicationInsights.Extensibility.PerfCounterCollector.QuickPulse.QuickPulseTelemetryModule(),
+                configuration);
+        }
+
+        private static void RegisterApplicationInsightsTelemetryModule(ITelemetryModule telemetryModule, TelemetryConfiguration configuration)
+        {
+            var existingModule = TelemetryModules.Instance.Modules.SingleOrDefault(m => m.GetType().Equals(telemetryModule.GetType()));
+            if (existingModule != null)
+            {
+                TelemetryModules.Instance.Modules.Remove(existingModule);
+            }
+
+            telemetryModule.Initialize(configuration);
+
+            TelemetryModules.Instance.Modules.Add(telemetryModule);
         }
 
         private void RegisterABTestServices(ContainerBuilder builder)
@@ -652,10 +854,13 @@ namespace NuGetGallery
                 .InstancePerDependency();
         }
 
-        private static ISqlConnectionFactory CreateDbConnectionFactory(IDiagnosticsService diagnostics, string name,
-            string connectionString, ISecretInjector secretInjector)
+        private static ISqlConnectionFactory CreateDbConnectionFactory(
+            ILoggerFactory loggerFactory,
+            string name,
+            string connectionString,
+            ISecretInjector secretInjector)
         {
-            var logger = diagnostics.SafeGetSource($"AzureSqlConnectionFactory-{name}");
+            var logger = loggerFactory.CreateLogger($"AzureSqlConnectionFactory-{name}");
             return new AzureSqlConnectionFactory(connectionString, secretInjector, logger);
         }
 
@@ -664,13 +869,14 @@ namespace NuGetGallery
             return Task.Run(() => connectionFactory.CreateAsync()).Result;
         }
 
-        private static void ConfigureGalleryReadOnlyReplicaEntitiesContext(ContainerBuilder builder,
-            IDiagnosticsService diagnostics,
+        private static void ConfigureGalleryReadOnlyReplicaEntitiesContext(
+            ContainerBuilder builder,
+            ILoggerFactory loggerFactory,
             ConfigurationService configuration,
             ISecretInjector secretInjector)
         {
             var galleryDbReadOnlyReplicaConnectionFactory = CreateDbConnectionFactory(
-                diagnostics,
+                loggerFactory,
                 nameof(ReadOnlyEntitiesContext),
                 configuration.Current.SqlReadOnlyReplicaConnectionString ?? configuration.Current.SqlConnectionString,
                 secretInjector);
@@ -684,11 +890,14 @@ namespace NuGetGallery
                 .InstancePerLifetimeScope();
         }
 
-        private static void ConfigureValidationEntitiesContext(ContainerBuilder builder, IDiagnosticsService diagnostics,
-            ConfigurationService configuration, ISecretInjector secretInjector)
+        private static void ConfigureValidationEntitiesContext(
+            ContainerBuilder builder,
+            ILoggerFactory loggerFactory,
+            ConfigurationService configuration,
+            ISecretInjector secretInjector)
         {
             var validationDbConnectionFactory = CreateDbConnectionFactory(
-                diagnostics,
+                loggerFactory,
                 nameof(ValidationEntitiesContext),
                 configuration.Current.SqlConnectionStringValidation,
                 secretInjector);
@@ -710,8 +919,11 @@ namespace NuGetGallery
                 .InstancePerLifetimeScope();
         }
 
-        private void RegisterAsynchronousValidation(ContainerBuilder builder, IDiagnosticsService diagnostics,
-            ConfigurationService configuration, ISecretInjector secretInjector)
+        private void RegisterAsynchronousValidation(
+            ContainerBuilder builder,
+            ILoggerFactory loggerFactory,
+            ConfigurationService configuration,
+            ISecretInjector secretInjector)
         {
             builder
                 .RegisterType<NuGet.Services.Validation.ServiceBusMessageSerializer>()
@@ -737,7 +949,7 @@ namespace NuGetGallery
 
             if (configuration.Current.AsynchronousPackageValidationEnabled)
             {
-                ConfigureValidationEntitiesContext(builder, diagnostics, configuration, secretInjector);
+                ConfigureValidationEntitiesContext(builder, loggerFactory, configuration, secretInjector);
 
                 builder
                     .Register(c =>
@@ -968,7 +1180,6 @@ namespace NuGetGallery
 
                     return new ResilientSearchHttpClient(
                         httpClientWrappers,
-                        c.Resolve<ILogger<ResilientSearchHttpClient>>(),
                         c.Resolve<ITelemetryService>());
                 });
 
@@ -1193,15 +1404,7 @@ namespace NuGetGallery
 
         private static IAuditingService GetAuditingServiceForAzureStorage(ContainerBuilder builder, IGalleryConfigurationService configuration)
         {
-            string instanceId;
-            try
-            {
-                instanceId = RoleEnvironment.CurrentRoleInstance.Id;
-            }
-            catch
-            {
-                instanceId = Environment.MachineName;
-            }
+            string instanceId = HostMachine.Name;
 
             var localIp = AuditActor.GetLocalIpAddressAsync().Result;
 
@@ -1229,19 +1432,25 @@ namespace NuGetGallery
             return new AggregateAuditingService(services);
         }
 
-        private static IEnumerable<T> GetAddInServices<T>(ContainerBuilder builder)
+        private static IEnumerable<T> GetAddInServices<T>()
+        {
+            return GetAddInServices<T>(sp => { });
+        }
+
+        private static IEnumerable<T> GetAddInServices<T>(Action<RuntimeServiceProvider> populateProvider)
         {
             var addInsDirectoryPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bin", "add-ins");
 
             using (var serviceProvider = RuntimeServiceProvider.Create(addInsDirectoryPath))
             {
+                populateProvider(serviceProvider);
                 return serviceProvider.GetExportedValues<T>();
             }
         }
 
         private static void RegisterAuditingServices(ContainerBuilder builder, IAuditingService defaultAuditingService)
         {
-            var auditingServices = GetAddInServices<IAuditingService>(builder);
+            var auditingServices = GetAddInServices<IAuditingService>();
             var services = new List<IAuditingService>(auditingServices);
 
             if (defaultAuditingService != null)
@@ -1257,26 +1466,21 @@ namespace NuGetGallery
                 .SingleInstance();
         }
 
-        private static void RegisterCookieComplianceService(ContainerBuilder builder, ConfigurationService configuration, DiagnosticsService diagnostics)
+        private static void RegisterCookieComplianceService(ConfigurationService configuration, ILoggerFactory loggerFactory)
         {
-            var service = GetAddInServices<ICookieComplianceService>(builder).FirstOrDefault() as CookieComplianceServiceBase;
+            var logger = loggerFactory.CreateLogger(nameof(CookieComplianceService));
 
-            if (service == null)
-            {
-                service = new NullCookieComplianceService();
-            }
-
-            builder.RegisterInstance(service)
-                .AsSelf()
-                .As<ICookieComplianceService>()
-                .SingleInstance();
-
+            ICookieComplianceService service = null;
             if (configuration.Current.IsHosted)
             {
-                // Initialize the service on App_Start to avoid any performance degradation during initial requests.
                 var siteName = configuration.GetSiteRoot(true);
-                HostingEnvironment.QueueBackgroundWorkItem(async cancellationToken => await service.InitializeAsync(siteName, diagnostics, cancellationToken));
+                service = GetAddInServices<ICookieComplianceService>(sp =>
+                {
+                    sp.ComposeExportedValue<ILogger>(logger);
+                }).FirstOrDefault();
             }
+
+            CookieComplianceService.Initialize(service ?? new NullCookieComplianceService(), logger);
         }
     }
 }

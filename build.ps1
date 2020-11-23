@@ -10,7 +10,8 @@ param (
     [string]$PackageSuffix,
     [string]$Branch,
     [string]$CommitSHA,
-    [string]$BuildBranch = '1f60ff35a3cebf1a0c5fb631d2534fd5b4a11edc'
+    [string]$BuildBranch = '6d1fcf147a7af8b6b4db842494bc7beed3b1d0e9',
+    [string]$VerifyMicrosoftPackageVersion = $null
 )
 
 Set-StrictMode -Version 1.0
@@ -83,8 +84,10 @@ Invoke-BuildStep 'Set version metadata in AssemblyInfo.cs' {
         (Join-Path $PSScriptRoot "src\NuGet.Services.Entities\Properties\AssemblyInfo.g.cs"), `
         (Join-Path $PSScriptRoot "src\NuGet.Services.DatabaseMigration\Properties\AssemblyInfo.g.cs"), `
         (Join-Path $PSScriptRoot "src\DatabaseMigrationTools\Properties\AssemblyInfo.g.cs"), `
-        (Join-Path $PSScriptRoot "src\AccountDeleter\Properties\AssemblyInfo.g.cs")
-        (Join-Path $PSScriptRoot "src\GalleryTools\Properties\AssemblyInfo.g.cs")
+        (Join-Path $PSScriptRoot "src\AccountDeleter\Properties\AssemblyInfo.g.cs"), `
+        (Join-Path $PSScriptRoot "src\GitHubVulnerabilities2Db\Properties\AssemblyInfo.g.cs"), `
+        (Join-Path $PSScriptRoot "src\GalleryTools\Properties\AssemblyInfo.g.cs"), `
+        (Join-Path $PSScriptRoot "src\VerifyMicrosoftPackage\Properties\AssemblyInfo.g.cs")
 
     Foreach ($Path in $Paths) {
         Set-VersionInfo -Path $Path -Version $SimpleVersion -Branch $Branch -Commit $CommitSHA
@@ -98,6 +101,11 @@ Invoke-BuildStep 'Building solution' {
 } `
 -ev +BuildErrors
 
+Invoke-BuildStep 'Signing the binaries' {
+    Sign-Binaries -Configuration $Configuration -BuildNumber $BuildNumber -MSBuildVersion "15" `
+} `
+-ev +BuildErrors
+
 Invoke-BuildStep 'Creating artifacts' { `
     New-ProjectPackage (Join-Path $PSScriptRoot "src\NuGetGallery.Core\NuGetGallery.Core.csproj") -Configuration $Configuration -Symbols -BuildNumber $BuildNumber -Version $SemanticVersion -PackageId "NuGetGallery.Core$PackageSuffix"
     New-ProjectPackage (Join-Path $PSScriptRoot "src\NuGet.Services.Entities\NuGet.Services.Entities.csproj") -Configuration $Configuration -Symbols -BuildNumber $BuildNumber -Version $SemanticVersion
@@ -106,7 +114,12 @@ Invoke-BuildStep 'Creating artifacts' { `
     New-Package (Join-Path $PSScriptRoot "src\DatabaseMigrationTools\DatabaseMigration.SupportRequest.nuspec") -Configuration $Configuration -BuildNumber $BuildNumber -Version $SemanticVersion -Branch $Branch -MSBuildVersion "15"
     New-Package (Join-Path $PSScriptRoot "src\DatabaseMigrationTools\DatabaseMigration.Validation.nuspec") -Configuration $Configuration -BuildNumber $BuildNumber -Version $SemanticVersion -Branch $Branch -MSBuildVersion "15"
     New-Package (Join-Path $PSScriptRoot "src\AccountDeleter\Gallery.AccountDeleter.nuspec") -Configuration $Configuration -BuildNumber $BuildNumber -Version $SemanticVersion -Branch $Branch -MSBuildVersion "15"
+    New-Package (Join-Path $PSScriptRoot "src\GitHubVulnerabilities2Db\GitHubVulnerabilities2Db.nuspec") -Configuration $Configuration -BuildNumber $BuildNumber -Version $SemanticVersion -Branch $Branch -MSBuildVersion "15"
     New-Package (Join-Path $PSScriptRoot "src\GalleryTools\Gallery.GalleryTools.nuspec") -Configuration $Configuration -BuildNumber $BuildNumber -Version $SemanticVersion -Branch $Branch -MSBuildVersion "15"
+    New-Package (Join-Path $PSScriptRoot "src\VerifyGitHubVulnerabilities\VerifyGitHubVulnerabilities.nuspec") -Configuration $Configuration -BuildNumber $BuildNumber -Version $SemanticVersion -Branch $Branch -MSBuildVersion "15"
+
+    if (!$VerifyMicrosoftPackageVersion) { $VerifyMicrosoftPackageVersion = $SemanticVersion }
+    New-Package (Join-Path $PSScriptRoot "src\VerifyMicrosoftPackage\VerifyMicrosoftPackage.nuspec") -Configuration $Configuration -BuildNumber $BuildNumber -Version $VerifyMicrosoftPackageVersion -Branch $Branch -MSBuildVersion "15"
 } `
 -ev +BuildErrors
 

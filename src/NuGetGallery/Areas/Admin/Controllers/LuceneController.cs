@@ -25,7 +25,7 @@ namespace NuGetGallery.Areas.Admin.Controllers
 
         //
         // GET: /Admin/Lucene/
-
+        [HttpGet]
         public virtual async Task<ActionResult> Index()
         {
             return View("Index", await GetLuceneInfo());
@@ -45,7 +45,6 @@ namespace NuGetGallery.Areas.Admin.Controllers
                 model.LastUpdated = await IndexingService.GetLastWriteTime();
                 model.DocumentCount = await IndexingService.GetDocumentCount();
                 model.IndexSize = await IndexingService.GetIndexSizeInBytes();
-                model.QueryStats = PerfCounters.GetStats(ExternalSearchService.SearchRoundtripTimePerfCounter);
             }
             catch (FileNotFoundException)
             {

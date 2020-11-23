@@ -21,9 +21,14 @@ namespace NuGetGallery
 {
     public class PackageService : CorePackageService, IPackageService
     {
+        private const string MarkdownFileExtension = ".md";
+
         private readonly IAuditingService _auditingService;
         private readonly ITelemetryService _telemetryService;
         private readonly ISecurityPolicyService _securityPolicyService;
+        private readonly IEntitiesContext _entitiesContext;
+        private readonly IContentObjectService _contentObjectService;
+        private const int packagesDisplayed = 5;
 
         public PackageService(
             IEntityRepository<PackageRegistration> packageRegistrationRepository,
@@ -31,12 +36,16 @@ namespace NuGetGallery
             IEntityRepository<Certificate> certificateRepository,
             IAuditingService auditingService,
             ITelemetryService telemetryService,
-            ISecurityPolicyService securityPolicyService)
+            ISecurityPolicyService securityPolicyService,
+            IEntitiesContext entitiesContext,
+            IContentObjectService contentObjectService)
             : base(packageRepository, packageRegistrationRepository, certificateRepository)
         {
             _auditingService = auditingService ?? throw new ArgumentNullException(nameof(auditingService));
             _telemetryService = telemetryService ?? throw new ArgumentNullException(nameof(telemetryService));
             _securityPolicyService = securityPolicyService ?? throw new ArgumentNullException(nameof(securityPolicyService));
+            _entitiesContext = entitiesContext ?? throw new ArgumentNullException(nameof(entitiesContext));
+            _contentObjectService = contentObjectService ?? throw new ArgumentNullException(nameof(contentObjectService));
         }
 
         /// <summary>
@@ -136,10 +145,100 @@ namespace NuGetGallery
         }
 
         public virtual IReadOnlyCollection<Package> FindPackagesById(
-            string id, 
+            string id,
             PackageDeprecationFieldsToInclude deprecationFields = PackageDeprecationFieldsToInclude.None)
         {
             return GetPackagesByIdQueryable(id, deprecationFields).ToList();
+        }
+
+        public PackageDependents GetPackageDependents(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                throw new ArgumentNullException(nameof(id));
+            }
+            
+            PackageDependents result = new PackageDependents();
+
+            // We use OPTIMIZE FOR UNKNOWN by default here because there are distinct 2-3 query plans that may be
+            // selected via SQL Server parameter sniffing. Because SQL Server caches query plans, this means that the
+            // first parameter plus query combination that SQL sees defines which query plan is selected and cached for
+            // all subsequent parameter values of the same query. This could result in a non-optimal query plan getting
+            // cached depending on what package ID is viewed first. Using OPTIMIZE FOR UNKNOWN causes a predictable
+            // query plan to be cached.
+            // 
+            // For example, the query plan for Newtonsoft.Json is very good for that specific parameter value since
+            // there are so many package dependents but the same query plan takes a very long time for packages with few
+            // or no dependents. The query plan for "UNKNOWN" (that is a package ID with unknown SQL Server statistic)
+            // behaves somewhat poorly for Newtonsoft.Json (2-5 seconds) but very well for the vast majority of
+            // packages. Because we have in-memory caching above this layer, OPTIMIZE FOR UNKNOWN is acceptable other
+            // unconfigured cases similar to Newtonsoft.Json because the extra cost of the non-optimal query plan is
+            // amortized over many, many page views. For the long tail packages, in-memory caching is less effective
+            // (low page views) so an optimal query should be selected for this category.
+            //
+            // For the cases where RECOMPILE is known to perform the best, the package ID can be added to the query hint
+            // configuration JSON file from the content object service. This should only be done when the following
+            // things are true:
+            //
+            //   1. The overhead of SQL Server recompile is worth it. We have seen the overhead to be 5-50ms.
+            //   2. SQL Server has up to date statistics which will lead to the proper query plan being selected.
+            //   3. SQL Server actually picks the proper query plan. We have observed cases where this does not happen
+            //      even with up-to-date statistics.
+            //
+            var useRecompile = _contentObjectService.QueryHintConfiguration.ShouldUseRecompileForPackageDependents(id);
+            using (_entitiesContext.WithQueryHint(useRecompile ? "RECOMPILE" : "OPTIMIZE FOR UNKNOWN"))
+            {
+                result.TopPackages = GetListOfDependents(id);
+                result.TotalPackageCount = GetDependentCount(id);
+            }
+
+            return result;
+        }
+
+        private IReadOnlyCollection<PackageDependent> GetListOfDependents(string id)
+        {
+            var listPackages = (from pd in _entitiesContext.PackageDependencies
+                                join p in _entitiesContext.Packages on pd.PackageKey equals p.Key
+                                join pr in _entitiesContext.PackageRegistrations on p.PackageRegistrationKey equals pr.Key
+                                where p.IsLatestSemVer2 && pd.Id == id
+                                group 1 by new { pr.Id, pr.DownloadCount, pr.IsVerified, p.Description } into ng
+                                orderby ng.Key.DownloadCount descending
+                                select new PackageDependent { Id = ng.Key.Id, DownloadCount = ng.Key.DownloadCount, IsVerified = ng.Key.IsVerified, Description = ng.Key.Description }
+                                ).Take(packagesDisplayed).ToList();
+
+            return listPackages;
+        }
+
+        private int GetDependentCount(string id)
+        {
+            var totalCount = (from pd in _entitiesContext.PackageDependencies
+                              join p in _entitiesContext.Packages on pd.PackageKey equals p.Key
+                              where pd.Id == id && p.IsLatestSemVer2
+                              group 1 by p.PackageRegistrationKey
+                              ).Count();
+
+            return totalCount;
+        }
+
+        public virtual IReadOnlyCollection<Package> FindPackagesById(
+            string id,
+            bool includePackageRegistration)
+        {
+            if (id == null)
+            {
+                throw new ArgumentNullException(nameof(id));
+            }
+
+            var packages = GetPackagesByIdQueryable(
+                id,
+                includeLicenseReports: false,
+                includePackageRegistration: includePackageRegistration,
+                includeUser: false,
+                includeSymbolPackages: false,
+                includeDeprecation: false,
+                includeDeprecationRelationships: false);
+
+            return packages.ToList();
         }
 
         public virtual Package FindPackageByIdAndVersion(
@@ -204,6 +303,51 @@ namespace NuGetGallery
                 packages?.Where(p => allowPrerelease || !p.IsPrerelease).ToList(),
                 semVerLevelKey,
                 allowPrerelease);
+        }
+
+        /// <inheritdoc />
+        public Package FilterLatestPackageBySuffix(IReadOnlyCollection<Package> packages, string version, bool prerelease)
+        {
+            IEnumerable<Package> GetSortedFiltered(IEnumerable<Package> localPackages, bool applyPrereleaseFilter = true)
+            {
+                var semvered = localPackages
+                    .Select(package => new {package, semVer= NuGetVersion.Parse(package.NormalizedVersion)})
+                    .ToList();
+                
+                return semvered
+                    .Where(d => d.semVer.IsPrerelease == prerelease || !applyPrereleaseFilter)
+                    .OrderByDescending(d => d.semVer)
+                    .Select(d => d.package)
+                    .ToList();
+            }
+
+            Package GetPrereleaseByVersion()
+            {
+                if (string.IsNullOrEmpty(version))
+                {
+                    return GetSortedFiltered(packages)
+                        .FirstOrDefault();
+                }
+                else
+                {
+                    return GetSortedFiltered(packages.Where(package => package.NormalizedVersion.IndexOf(version, StringComparison.InvariantCultureIgnoreCase) >= 0))
+                        .FirstOrDefault();
+                }
+            }
+            
+            Package GetLatestPrerelease()
+            {
+                return GetSortedFiltered(packages)
+                    .FirstOrDefault();
+            }
+            
+            Package GetLatestStable()
+            {
+                return GetSortedFiltered(packages, false)
+                    .FirstOrDefault();
+            }
+
+            return GetPrereleaseByVersion() ?? GetLatestPrerelease() ?? GetLatestStable();
         }
 
         private static Package FilterLatestPackageHelper(
@@ -548,6 +692,8 @@ namespace NuGetGallery
             package.EmbeddedLicenseType = GetEmbeddedLicenseType(packageMetadata);
             package.LicenseExpression = GetLicenseExpression(packageMetadata);
             package.HasEmbeddedIcon = !string.IsNullOrWhiteSpace(packageMetadata.IconFile);
+            package.HasReadMe = !string.IsNullOrWhiteSpace(packageMetadata.ReadmeFile);
+            package.EmbeddedReadmeType = GetEmbeddedReadmeType(packageMetadata);
 
             return package;
         }
@@ -579,7 +725,6 @@ namespace NuGetGallery
 
         private static EmbeddedLicenseFileType GetEmbeddedLicenseType(string licenseFileName)
         {
-            const string MarkdownFileExtension = ".md";
             const string TextFileExtension = ".txt";
 
             var extension = Path.GetExtension(licenseFileName);
@@ -595,6 +740,23 @@ namespace NuGetGallery
             }
 
             throw new ArgumentException($"Invalid file name: {licenseFileName}");
+        }
+
+        private static EmbeddedReadmeFileType GetEmbeddedReadmeType(PackageMetadata packageMetadata)
+        {
+            if (packageMetadata.ReadmeFile == null)
+            {
+                return EmbeddedReadmeFileType.Absent;
+            }
+
+            var extension = Path.GetExtension(packageMetadata.ReadmeFile);
+
+            if (MarkdownFileExtension.Equals(extension, StringComparison.OrdinalIgnoreCase))
+            {
+                return EmbeddedReadmeFileType.Markdown;
+            }
+
+            throw new ArgumentException($"The file name for the package readme must have the \"md\" file extension: {packageMetadata.ReadmeFile}");
         }
 
         private static void ValidateSupportedFrameworks(string[] supportedFrameworks)

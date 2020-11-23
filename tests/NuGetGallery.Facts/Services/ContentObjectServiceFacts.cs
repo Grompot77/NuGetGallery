@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
+using System.Reflection;
 using System.Threading.Tasks;
 using System.Web;
 using Moq;
@@ -13,6 +14,22 @@ namespace NuGetGallery.Services
 {
     public class ContentObjectServiceFacts
     {
+        public class TheConstructor : TestContainer
+        {
+            [Fact]
+            public void InitializesAllPublicProperties()
+            {
+                // Arrange
+                var service = new ContentObjectService(new Mock<IContentService>().Object);
+                var properties = service
+                    .GetType()
+                    .GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.GetProperty);
+
+                // Act & Assert
+                Assert.All(properties, p => Assert.NotNull(p.GetGetMethod().Invoke(service, null)));
+            }
+        }
+
         public class TheRefreshMethod : TestContainer
         {
             [Fact]
@@ -90,10 +107,12 @@ namespace NuGetGallery.Services
 
                 var previewSearchPercentage = 2;
                 var previewHijackPercentage = 4;
+                var dependentsPercentage = 6;
 
                 var abTestConfiguration = new ABTestConfiguration(
                     previewSearchPercentage,
-                    previewHijackPercentage);
+                    previewHijackPercentage,
+                    dependentsPercentage);
                 var abTestJson = JsonConvert.SerializeObject(abTestConfiguration);
 
                 var contentService = GetMock<IContentService>();
@@ -150,6 +169,7 @@ namespace NuGetGallery.Services
 
                 Assert.Equal(previewSearchPercentage, abTestConfiguration.PreviewSearchPercentage);
                 Assert.Equal(previewHijackPercentage, abTestConfiguration.PreviewHijackPercentage);
+                Assert.Equal(dependentsPercentage, abTestConfiguration.DependentsPercentage);
             }
         }
     }

@@ -32,6 +32,8 @@ namespace NuGetGallery
 
         void TrackPackagePushFailureEvent(string id, NuGetVersion version);
 
+        void TrackPackagePushDisconnectEvent();
+
         void TrackPackageUnlisted(Package package);
 
         void TrackPackageListed(Package package);
@@ -63,7 +65,7 @@ namespace NuGetGallery
 
         void TrackNewUserRegistrationEvent(User user, Credential identity);
 
-        void TrackUserChangedMultiFactorAuthentication(User user, bool enabledMultiFactorAuth);
+        void TrackUserChangedMultiFactorAuthentication(User user, bool enabledMultiFactorAuth, string referrer);
 
         void TrackNewCredentialCreated(User user, Credential credential);
 
@@ -201,6 +203,11 @@ namespace NuGetGallery
         /// <param name="packageId">The id of the package that has the symbols uploaded.</param>
         /// <param name="packageVersion">The version of the package that has the symbols uploaded.</param>
         void TrackSymbolPackagePushFailureEvent(string packageId, string packageVersion);
+
+        /// <summary>
+        /// A telemetry event emitted when a symbol package push failed due to client disconnect.
+        /// </summary>
+        void TrackSymbolPackagePushDisconnectEvent();
 
         /// <summary>
         /// A telemetry event emitted when a symbol package fails Gallery validation.
@@ -362,9 +369,24 @@ namespace NuGetGallery
         /// </summary>
         /// <param name="schemaVersion">The schema version.</param>
         /// <param name="previewSearchBucket">The bucket for the preview search test.</param>
+        /// <param name="packageDependentBucket">The bucket for the package dependents test</param>
         void TrackABTestEnrollmentInitialized(
             int schemaVersion,
-            int previewSearchBucket);
+            int previewSearchBucket,
+            int packageDependentBucket);
+
+        /// <summary>
+        /// Track when an A/B test enrollment is upgraded
+        /// </summary>
+        /// <param name="oldSchemaVersion">The old schema version.</param>
+        /// <param name="newSchemaVersion">The new schema version.</param>
+        /// <param name="previewSearchBucket">The bucket for the preview search test.</param>
+        /// <param name="packageDependentBucket">The bucket for the package dependents test</param>
+        void TrackABTestEnrollmentUpgraded(
+            int oldSchemaVersion,
+            int newSchemaVersion,
+            int previewSearchBucket,
+            int packageDependentBucket);
 
         /// <summary>
         /// Track when an A/B test is evaluated.

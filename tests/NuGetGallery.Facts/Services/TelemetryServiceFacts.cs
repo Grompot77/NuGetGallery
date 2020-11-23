@@ -21,9 +21,15 @@ namespace NuGetGallery
         public class TheConstructor
         {
             [Fact]
-            public void ThrowsIfDiagnosticsServiceIsNull()
+            public void ThrowsForNullDiagnosticsSource()
             {
-                Assert.Throws<ArgumentNullException>(() => new TelemetryService(null));
+                Assert.Throws<ArgumentNullException>(() => new TelemetryService(null, new Mock<ITelemetryClient>().Object));
+            }
+
+            [Fact]
+            public void ThrowsForNullTelemetryClient()
+            {
+                Assert.Throws<ArgumentNullException>(() => new TelemetryService(new Mock<IDiagnosticsSource>().Object, null));
             }
         }
 
@@ -124,9 +130,9 @@ namespace NuGetGallery
 
                     yield return new object[] { "PackageDeprecate",
                         (TrackAction)(s => s.TrackPackageDeprecate(
-                            packages, 
-                            PackageDeprecationStatus.Legacy, 
-                            new PackageRegistration { Id = "alt" }, 
+                            packages,
+                            PackageDeprecationStatus.Legacy,
+                            new PackageRegistration { Id = "alt" },
                             new Package { PackageRegistration = new PackageRegistration { Id = "alt-2" }, NormalizedVersion = "1.2.3" }, true))
                     };
 
@@ -315,11 +321,23 @@ namespace NuGetGallery
                     };
 
                     yield return new object[] { "ABTestEnrollmentInitialized",
-                        (TrackAction)(s => s.TrackABTestEnrollmentInitialized(1, 42))
+                        (TrackAction)(s => s.TrackABTestEnrollmentInitialized(2, 42, 47))
+                    };
+
+                    yield return new object[] { "ABTestEnrollmentUpgraded",
+                        (TrackAction)(s => s.TrackABTestEnrollmentUpgraded(1, 2, 42, 47))
                     };
 
                     yield return new object[] { "ABTestEvaluated",
                         (TrackAction)(s => s.TrackABTestEvaluated("SearchPreview", true, true, 0, 20))
+                    };
+
+                    yield return new object[] { "PackagePushDisconnect",
+                        (TrackAction)(s => s.TrackPackagePushDisconnectEvent())
+                    };
+
+                    yield return new object[] { "SymbolPackagePushDisconnect",
+                        (TrackAction)(s => s.TrackSymbolPackagePushDisconnectEvent())
                     };
                 }
             }
@@ -798,7 +816,7 @@ namespace NuGetGallery
 
                 var properties = Assert.Single(allProperties);
                 Assert.Contains(
-                    new KeyValuePair<string, string>("PackageDeprecationReason", ((int)status).ToString()), 
+                    new KeyValuePair<string, string>("PackageDeprecationReason", ((int)status).ToString()),
                     properties);
 
                 Assert.Contains(
@@ -845,8 +863,8 @@ namespace NuGetGallery
                     new KeyValuePair<string, string>("PackageDeprecationReason", ((int)PackageDeprecationStatus.NotDeprecated).ToString()),
                     properties);
 
-                var expectedAlternateId = hasRegistration 
-                    ? alternateRegistration.Id 
+                var expectedAlternateId = hasRegistration
+                    ? alternateRegistration.Id
                     : (hasPackage ? alternatePackage.Id : null);
 
                 Assert.Contains(
@@ -918,8 +936,8 @@ namespace NuGetGallery
         {
             public class TelemetryServiceWrapper : TelemetryService
             {
-                public TelemetryServiceWrapper(IDiagnosticsService diagnosticsService, ITelemetryClient telemetryClient)
-                    : base(diagnosticsService, telemetryClient)
+                public TelemetryServiceWrapper(IDiagnosticsSource diagnosticsSource, ITelemetryClient telemetryClient)
+                    : base(diagnosticsSource, telemetryClient)
                 {
                 }
 
@@ -933,14 +951,9 @@ namespace NuGetGallery
             public static TelemetryServiceWrapper CreateService()
             {
                 var traceSource = new Mock<IDiagnosticsSource>();
-                var traceService = new Mock<IDiagnosticsService>();
                 var telemetryClient = new Mock<ITelemetryClient>();
 
-                traceService.Setup(s => s.GetSource(It.IsAny<string>()))
-                    .Returns(traceSource.Object);
-
-                var telemetryService = new TelemetryServiceWrapper(traceService.Object, telemetryClient.Object);
-
+                var telemetryService = new TelemetryServiceWrapper(traceSource.Object, telemetryClient.Object);
                 telemetryService.TraceSource = traceSource;
                 telemetryService.TelemetryClient = telemetryClient;
 

@@ -2,14 +2,13 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
-using System.Linq;
 using System.Web;
+using System.Linq;
 using Microsoft.Extensions.Logging;
 using Moq;
-using NuGet.Services.Entities;
-using NuGetGallery.Cookies;
-using NuGetGallery.Services;
 using Xunit;
+using NuGet.Services.Entities;
+using NuGetGallery.Services;
 
 namespace NuGetGallery
 {
@@ -30,7 +29,8 @@ namespace NuGetGallery
                 InitializedEnrollment = new ABTestEnrollment(
                     ABTestEnrollmentState.FirstHit,
                     schemaVersion: 1,
-                    previewSearchBucket: enrollment);
+                    previewSearchBucket: enrollment,
+                    packageDependentBucket: 42);
                 Configuration.Setup(x => x.PreviewSearchPercentage).Returns(config);
 
                 var result = Target.IsPreviewSearchEnabled(User);
@@ -46,23 +46,6 @@ namespace NuGetGallery
 
         public abstract class BaseSerializationFacts : Facts
         {
-            [Fact]
-            public void ReturnsFalseWhenCookieConsentIsNotGiven()
-            {
-                CookieComplianceService
-                    .Setup(x => x.CanWriteNonEssentialCookies(It.IsAny<HttpRequestBase>()))
-                    .Returns(false);
-
-                var result = RunTest(User);
-
-                Assert.False(result, "The test should not be enabled.");
-                CookieComplianceService.Verify(x => x.CanWriteNonEssentialCookies(HttpContext.Object.Request), Times.Once);
-                Assert.Empty(ResponseCookies);
-                EnrollmentFactory.Verify(x => x.Initialize(), Times.Never);
-                ABTestEnrollment outEnrollment;
-                EnrollmentFactory.Verify(x => x.TryDeserialize(It.IsAny<string>(), out outEnrollment), Times.Never);
-            }
-
             [Fact]
             public void ReturnsFalseWhenUserIsNotInFlight()
             {
@@ -146,19 +129,21 @@ namespace NuGetGallery
                 EnrollmentFactory = new Mock<IABTestEnrollmentFactory>();
                 ContentObjectService = new Mock<IContentObjectService>();
                 Configuration = new Mock<IABTestConfiguration>();
-                CookieComplianceService = new Mock<ICookieComplianceService>();
                 TelemetryService = new Mock<ITelemetryService>();
                 Logger = new Mock<ILogger<CookieBasedABTestService>>();
+                DateTimeProvider = new Mock<IDateTimeProvider>();
 
                 User = new User();
                 InitializedEnrollment = new ABTestEnrollment(
                     ABTestEnrollmentState.FirstHit,
                     schemaVersion: 1,
-                    previewSearchBucket: 23);
+                    previewSearchBucket: 23,
+                    packageDependentBucket: 47);
                 DeserializedEnrollment = new ABTestEnrollment(
                     ABTestEnrollmentState.Active,
                     schemaVersion: 1,
-                    previewSearchBucket: 42);
+                    previewSearchBucket: 42,
+                    packageDependentBucket: 58);
                 OutEnrollment = DeserializedEnrollment;
                 SerializedEnrollment = "fake-serialization";
                 RequestCookies = new HttpCookieCollection();
@@ -167,7 +152,6 @@ namespace NuGetGallery
 
                 HttpContext.Setup(x => x.Request.Cookies).Returns(() => RequestCookies);
                 HttpContext.Setup(x => x.Response.Cookies).Returns(() => ResponseCookies);
-                CookieComplianceService.SetReturnsDefault(true);
                 FeatureFlagService.SetReturnsDefault(true);
 
                 EnrollmentFactory.Setup(x => x.Initialize()).Returns(() => InitializedEnrollment);
@@ -181,14 +165,17 @@ namespace NuGetGallery
                 ContentObjectService.Setup(x => x.ABTestConfiguration).Returns(() => Configuration.Object);
                 Configuration.Setup(x => x.PreviewSearchPercentage).Returns(() => PreviewSearchPercentage);
 
+                CurrentTime = DateTime.UtcNow;
+                DateTimeProvider.Setup(x => x.UtcNow).Returns(CurrentTime);
+
                 Target = new CookieBasedABTestService(
                     HttpContext.Object,
                     FeatureFlagService.Object,
                     EnrollmentFactory.Object,
                     ContentObjectService.Object,
-                    CookieComplianceService.Object,
                     TelemetryService.Object,
-                    Logger.Object);
+                    Logger.Object,
+                    DateTimeProvider.Object);
             }
 
             public Mock<HttpContextBase> HttpContext { get; }
@@ -196,9 +183,9 @@ namespace NuGetGallery
             public Mock<IABTestEnrollmentFactory> EnrollmentFactory { get; }
             public Mock<IContentObjectService> ContentObjectService { get; }
             public Mock<IABTestConfiguration> Configuration { get; }
-            public Mock<ICookieComplianceService> CookieComplianceService { get; }
             public Mock<ITelemetryService> TelemetryService { get; }
             public Mock<ILogger<CookieBasedABTestService>> Logger { get; }
+            public Mock<IDateTimeProvider> DateTimeProvider { get; }
             public User User { get; }
             public ABTestEnrollment InitializedEnrollment { get; set; }
             public ABTestEnrollment DeserializedEnrollment { get; }
@@ -208,6 +195,7 @@ namespace NuGetGallery
             public HttpCookieCollection ResponseCookies { get; }
             public int PreviewSearchPercentage { set; get; }
             public CookieBasedABTestService Target { get; }
+            public DateTime CurrentTime { get; }
 
             public void VerifyCookie(HttpCookie cookie)
             {
@@ -215,7 +203,7 @@ namespace NuGetGallery
                 Assert.Equal(SerializedEnrollment, cookie.Value);
                 Assert.True(cookie.HttpOnly, "The cookie should be HTTP only.");
                 Assert.True(cookie.Secure, "The cookie should be secure.");
-                Assert.Equal(DateTime.MaxValue, cookie.Expires);
+                Assert.Equal(CurrentTime.AddYears(1), cookie.Expires);
                 Assert.Equal("/", cookie.Path);
                 Assert.Null(cookie.Domain);
                 Assert.False(cookie.HasKeys, "The cookie itself should not have keys.");
